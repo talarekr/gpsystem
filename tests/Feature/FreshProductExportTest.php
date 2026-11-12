@@ -93,12 +93,20 @@ class FreshProductExportTest extends TestCase
                 $rows = $this->csv($s, $type.'.csv');
                 $this->assertCount($mode === 'sample' ? 5 : $total, $rows);
                 $this->assertSame(ProductExportProjection::columns(), array_keys($rows[0]));
-                $ids = array_column($rows, 'part_id');
-                foreach ($this->csv($s, 'zdjecia_czesci.csv') as $r) {
-                    $this->assertContains($r['part_id'], $ids);
-                }
-                foreach ($this->csv($s, 'marketplace_listingi_czesci.csv') as $r) {
-                    $this->assertContains($r['part_id'], $ids);
+                $this->assertSame([$type.'.csv', 'manifest.json'], array_keys($s['files']));
+                $this->assertSame([$type.'.csv'], array_map('basename', glob($this->root.'/'.$s['export_id'].'/*.csv')));
+                foreach ($rows as $r) {
+                    foreach (['images_json', 'marketplace_listings_json', 'issues_json'] as $field) {
+                        $values = json_decode($r[$field], true, 512, JSON_THROW_ON_ERROR);
+                        foreach ($values as $value) {
+                            $this->assertSame($r['part_id'], $value['part_id']);
+                        }
+                    }
+                    $this->assertCount((int) $r['image_count'], json_decode($r['images_json'], true));
+                    $this->assertCount((int) $r['issues_count'], json_decode($r['issues_json'], true));
+                    $this->assertSame($r['car_id'], json_decode($r['car_json'], true)['id']);
+                    $this->assertSame($r['category_id'], json_decode($r['category_json'], true)['id']);
+                    $this->assertSame($r['storage_location_id'], json_decode($r['storage_location_json'], true)['id']);
                 }
                 $this->assertSame($s['total'], $s['images']);
                 $this->assertSame($s['total'] * 3, $s['listings']);
@@ -181,7 +189,12 @@ class FreshProductExportTest extends TestCase
         $this->assertSame('\\N', $rows[1]['ebay_de_url']);
         $this->assertSame('000RATE', $rows[2]['allegro_shipping_rate_id']);
         $this->assertSame('4', $rows[2]['allegro_shipping_account_id']);
-        $this->assertContains('ebay_market_conflict', array_column($this->csv($s, 'issues.csv'), 'reason_code'));
+        $this->assertContains('ebay_market_conflict', array_column(json_decode($rows[1]['issues_json'], true), 'reason_code'));
+        $listings = json_decode($rows[0]['marketplace_listings_json'], true);
+        $this->assertCount(4, $listings);
+        $this->assertCount(2, array_filter($listings, fn ($l) => $l['marketplace'] === 'ebay_de'));
+        $this->assertCount(1, array_filter($listings, fn ($l) => $l['marketplace'] === 'ebay_fr'));
+        $this->assertContains('multiple_ebay_de_listings', array_column(json_decode($rows[0]['issues_json'], true), 'reason_code'));
     }
 
     public function test_owner_and_download_integrity(): void
@@ -206,6 +219,9 @@ class FreshProductExportTest extends TestCase
         $this->postJson($url.'/'.$prepared['export_id'], ['action' => 'capture'])->assertOk()->assertJsonPath('state', 'ready');
         $this->postJson($url.'/'.$prepared['export_id'], ['action' => 'tick'])->assertOk()->assertJsonPath('state', 'done');
         $this->get($url.'/'.$prepared['export_id'].'?download=czesci.csv')->assertOk();
+        foreach (['zdjecia_czesci.csv', 'marketplace_listingi_czesci.csv', 'relacje_czesci.csv', 'issues.csv'] as $file) {
+            $this->getJson($url.'/'.$prepared['export_id'].'?download='.$file)->assertUnprocessable();
+        }
         $this->getJson($url.'/'.$prepared['export_id'].'?download=../../.env')->assertUnprocessable();
         try {
             app(FreshProductExport::class)->status(999, $prepared['export_id']);
@@ -310,7 +326,99 @@ class FreshProductExportTest extends TestCase
         $response = $this->postJson($url.'/'.$s['export_id'], ['action' => 'capture'])->assertStatus(500);
         $response->assertJsonPath('diagnostic.action', 'capture')->assertJsonPath('diagnostic.phase', 'relation_read')->assertJsonPath('diagnostic.current_table', 'part_images');
         $response->assertJsonPath('export_id', $s['export_id']);
-        $this->assertStringNotContainsString('SECRET',$response->getContent());
+        $this->assertStringNotContainsString('SECRET', $response->getContent());
         Http::assertNothingSent();
+    }
+
+    public function test_gallery_metadata_and_reference_data_roundtrip_in_one_row(): void
+    {
+        DB::table('part_images')->where('part_id', 1)->update(['alt_text' => 'Oryginał; "Łódź"', 'legacy_payload' => '{"presentation":{"product_path":"parts/1/product.jpg"}}']);
+        DB::table('part_images')->insert(['part_id' => 1, 'path' => 'parts/1/b.jpg', 'sort_order' => 0, 'is_primary' => false]);
+        DB::table('cars')->where('id', 1)->update(['gearbox_code' => '000GEAR', 'defects_notes' => 'Notatka auta']);
+        $s = $this->finish($this->start('czesci', 'full'));
+        $r = $this->csv($s, 'czesci.csv')[0];
+        $images = json_decode($r['images_json'], true, 512, JSON_THROW_ON_ERROR);
+        $this->assertCount(2, $images);
+        $this->assertSame([1, 2], array_column($images, 'import_order'));
+        $this->assertTrue($images[0]['is_primary']);
+        $this->assertSame('parts/1/a.jpg', $images[0]['source_path']);
+        foreach (['image_id', 'original_name', 'source_path', 'sort_order', 'is_primary', 'role', 'source_type', 'mime_type', 'extension', 'import_order', 'copy_relative_path', 'source_metadata'] as $key) {
+            $this->assertArrayHasKey($key, $images[0]);
+        }
+        $this->assertSame('Oryginał; "Łódź"', $images[0]['source_metadata']['alt_text']);
+        $this->assertSame('parts/1/product.jpg', $images[0]['source_metadata']['legacy_payload']['presentation']['product_path']);
+        $this->assertSame('Notatka auta', json_decode($r['car_json'], true)['defects_notes']);
+        $this->assertSame('000GEAR', $r['car_gearbox_code']);
+        foreach (['category_mappings_json', 'part_translations_json', 'category_translations_json'] as $field) {
+            $this->assertSame([], json_decode($r[$field], true));
+        }
+        $manifest = json_decode(file_get_contents(app(FreshProductExport::class)->download(7, $s['export_id'], 'manifest.json')), true);
+        $this->assertSame('gpswiss-products-2', $manifest['schema_version']);
+        $this->assertSame(['czesci.csv'], array_keys($manifest['files']));
+        $this->assertSame(hash_file('sha256', $this->root.'/'.$s['export_id'].'/czesci.csv'), $manifest['files']['czesci.csv']['sha256']);
+    }
+
+    public function test_populated_translations_and_mappings_are_embedded_per_part(): void
+    {
+        DB::table('marketplace_category_mappings')->insert(['local_category_id' => 1, 'channel' => 'allegro_main', 'external_category_id' => '000CAT', 'metadata' => '{"source":"local"}']);
+        DB::table('part_translations')->insert(['part_id' => 1, 'locale' => 'fr', 'name' => 'Pièce; "complète"', 'description' => '<p>Texte
+complet</p>']);
+        DB::table('part_translations')->insert(['part_id' => 2, 'locale' => 'fr', 'name' => 'Other part']);
+        DB::table('category_translations')->insert(['category_id' => 1, 'locale' => 'fr', 'name' => 'Boîtes']);
+        $s = $this->finish($this->start('czesci', 'full'));
+        $rows = $this->csv($s, 'czesci.csv');
+        $r = $rows[0];
+        $this->assertSame('000CAT', $r['allegro_category_id']);
+        $this->assertSame('000CAT', json_decode($r['category_mappings_json'], true)[0]['external_category_id']);
+        $this->assertSame('local', json_decode($r['category_mappings_json'], true)[0]['metadata']['source']);
+        $translations = json_decode($r['part_translations_json'], true);
+        $this->assertCount(1, $translations);
+        $this->assertSame('1', $translations[0]['part_id']);
+        $this->assertSame('Pièce; "complète"', $translations[0]['name']);
+        $this->assertSame('Boîtes', json_decode($r['category_translations_json'], true)[0]['name']);
+        $this->assertSame([], json_decode($rows[2]['part_translations_json'], true));
+    }
+
+    public function test_missing_relations_are_null_objects_and_empty_json_lists(): void
+    {
+        DB::table('parts')->where('id', 1)->update(['car_id' => null, 'category_id' => null, 'storage_location_id' => null]);
+        DB::table('part_images')->where('part_id', 1)->delete();
+        DB::table('marketplace_listings')->where('part_id', 1)->delete();
+        $s = $this->finish($this->start('czesci', 'full'));
+        $r = $this->csv($s, 'czesci.csv')[0];
+        foreach (['car_json', 'category_json', 'storage_location_json', 'car_id', 'car_make', 'car_vin'] as $field) {
+            $this->assertSame('\\N', $r[$field]);
+        }
+        foreach (['images_json', 'marketplace_listings_json', 'category_mappings_json', 'part_translations_json', 'category_translations_json'] as $field) {
+            $this->assertSame([], json_decode($r[$field], true));
+        }
+        $issues = json_decode($r['issues_json'], true);
+        $this->assertCount((int) $r['issues_count'], $issues);
+        foreach (['missing_car', 'missing_category', 'missing_images'] as $reason) {
+            $this->assertContains($reason, array_column($issues, 'reason_code'));
+        }
+    }
+
+    public function test_old_schema_is_not_resumed_or_advertised_as_single_file(): void
+    {
+        $s = $this->finish($this->start());
+        $path = $this->root.'/'.$s['export_id'];
+        $state = json_decode(file_get_contents($path.'/state.json'), true);
+        $state['schema_version'] = 'gpswiss-products-1';
+        file_put_contents($path.'/state.json', json_encode($state));
+        $before = file_get_contents($path.'/state.json');
+        $csvBefore = file_get_contents($path.'/czesci.csv');
+        $service = new FreshProductExport;
+        $status = $service->status(7, $s['export_id']);
+        $this->assertSame('schema_changed', $status['state']);
+        $this->assertSame([], $status['files']);
+        try {
+            $service->action(7, $s['export_id'], 'resume');
+            $this->fail('Old schema resumed');
+        } catch (MigrationExportException $e) {
+            $this->assertSame('export_schema_changed_prepare_new_export',$e->reasonCode);
+        }
+        $this->assertSame($before,file_get_contents($path.'/state.json'));
+        $this->assertSame($csvBefore,file_get_contents($path.'/czesci.csv'));
     }
 }

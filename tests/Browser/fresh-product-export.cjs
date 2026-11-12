@@ -17,7 +17,7 @@ const html=fs.readFileSync(__dirname+'/../../resources/views/admin/tools/product
    else if(b.action==='capture'){captures++;state.state='ready';}
    else if(b.action==='stop')state.state='stopped';
    else if(b.action==='resume')state.state='ready';
-   else if(b.action==='tick'){ticks++;if(fail){fail=false;return route.fulfill({status:503,contentType:'application/json',body:'{"error":"temporary_failure"}'});}state.processed=5;state.images=10;state.listings=5;state.state='done';state.files={'czesci.csv':{},'zdjecia_czesci.csv':{},'manifest.json':{}};}
+   else if(b.action==='tick'){ticks++;if(fail){fail=false;return route.fulfill({status:503,contentType:'application/json',body:'{"error":"temporary_failure"}'});}state.processed=5;state.images=10;state.listings=5;state.state='done';state.files={'czesci.csv':{},'manifest.json':{}};}
    else throw Error('Unexpected action '+b.action);
   }
   return route.fulfill({contentType:'application/json',body:JSON.stringify(state)});
@@ -27,8 +27,8 @@ const html=fs.readFileSync(__dirname+'/../../resources/views/admin/tools/product
  await page.click('#stop');await page.waitForFunction(()=>document.querySelector('#status').textContent==='Zatrzymany');
  await page.reload();await page.waitForFunction(()=>document.querySelector('#status').textContent==='Zatrzymany');
  await page.click('#resume');await page.waitForFunction(()=>document.querySelector('#status').textContent==='Gotowy do pobrania');
- assert.equal(captures,1);assert.equal(ticks,2);assert.equal(await page.locator('#files a').count(),3);
+ assert.equal(captures,1);assert.equal(ticks,2);assert.equal(await page.locator('#files a').count(),2);
  assert.match(await page.locator('#files a').first().getAttribute('href'),new RegExp(id));
- await page.reload();await page.waitForFunction(()=>document.querySelectorAll('#files a').length===3);assert.deepEqual(errors,[]);
+ await page.reload();await page.waitForFunction(()=>document.querySelectorAll('#files a').length===2);assert.deepEqual(errors,[]);
  console.log('PASS fresh export UI: prepare, capture, failure, reload, stop, resume, download links');
 }finally{await browser.close();}})().catch(e=>{console.error(e);process.exit(1)});

@@ -1,153 +1,121 @@
-# Fresh product export to WystawCzesc
+# Single-file product export to WystawCzesc
 
-Independent OwnerAdmin tool: **Części → Eksport do WystawCzesc**. The old Migration
-Runner, its runs, checkpoints, photos, A/B/C and supplements are never consulted.
-No production export or deployment is part of this change.
+Schema: `gpswiss-products-2`. Exactly one CSV is generated per export:
+`czesci.csv`, `sprzedane.csv` or `do_wystawienia.csv`. One CSV record is one part,
+including all associated data. `manifest.json` is the only other download.
+No photo, listing, relationship or issues CSV is generated.
 
-## HTTP contract
+OwnerAdmin page: **Części → Eksport do WystawCzesc**, at
+`GET /admin/tools/product-migration-export`. POST here accepts `action=prepare`,
+`type=czesci|sprzedane|do_wystawienia`, `mode=sample|full`.
+`GET /admin/tools/product-migration-export/{export}` reads owner-scoped status.
+POST on that URL accepts `capture|tick|stop|resume`. Download uses GET with
+`?download={selected-main-file.csv|manifest.json}`. Requests keep existing
+read-only session/SQL middleware, authentication, OwnerAdmin checks and CSRF.
+The old Migration Runner and its captures/photos/A/B/C are never accessed.
 
-`GET /admin/tools/product-migration-export` renders the page.
-`POST` on that URL accepts `action=prepare`, `type=czesci|sprzedane|do_wystawienia`,
-`mode=sample|full` and returns a new `export_id` before starting the potentially long capture.
+## Single-row JSON contract
 
-`GET /admin/tools/product-migration-export/{export}` returns owner-scoped progress.
-`POST` on that URL accepts `action=capture|tick|stop|resume`.
-`GET` on that URL with `?download={file}` downloads a completed, hash-verified file.
-All mutations of export artifacts use POST with the normal CSRF guard. Existing
-read-only session and SQL middleware prevent session/business database writes.
-GET never starts or advances an export. Download names are allowlisted. Private
-files/directories use 0600/0700 and responses disable caching. Only the creating
-OwnerAdmin can inspect, advance or download a run.
+All JSON cells contain valid JSON after parsing the semicolon-delimited CSV.
+Arrays are `[]` when empty; missing related objects are CSV NULL (`\N`).
+Identifiers/codes remain text, including within JSON where the capture normalized
+them as text. HTML, Unicode and newlines are not truncated.
 
-## Capture and resource boundaries
+- `images_json`: ordered array of image objects, with image_id, original_name,
+  source_path, sort_order, is_primary, role, source_type, mime_type, extension,
+  import_order, copy_relative_path and complete sanitized source_metadata.
+  This is the authoritative gallery. Order is primary first, then sort_order,
+  image ID and path; import_order starts at 1. source_metadata retains alt text,
+  source identifiers and stored presentation-variant paths. Code photos are
+  included. image_count and primary_image_path are convenience fields. Paths,
+  never basenames alone, identify copied files. No physical file is read/copied.
+- `marketplace_listings_json`: array of all locally captured listings for this
+  part, retaining each row's safe fields/source_metadata, local/external IDs,
+  account identity, price/currency, status, URL and market resolution. All
+  ambiguous DE/Ovoko offers remain here. Historical FR and Allegro rows can be
+  retained here; there are no separate FR shortcut columns. No supplement is used.
+- `issues_json`: array of objects `{part_id, reason_code, details}`. Existing
+  reason codes are retained, including missing_car/category/images, orphan
+  references, multiple_ebay_de_listings/multiple_ovoko_listings,
+  ebay_market_conflict/unknown and missing marketplace URLs.
+  `issues_count` is exactly its array length. There is no issues.csv.
+- `car_json`, `category_json`, `storage_location_json`: complete sanitized local
+  related records, or NULL, preserving fields beyond the flat convenience columns.
+- `category_mappings_json`, `part_translations_json`,
+  `category_translations_json`: the respective per-part related arrays that were
+  previously exported in relacje_czesci.csv. No unrelated parts' data is embedded.
+- `vehicle_snapshot`, `additional_part_codes`, `legacy_payload`, `review_metadata`
+  and `source_part_json` retain their existing content and sanitization semantics.
 
-Prepare allocates only a private directory, under
-`storage/app/private/product-migration-exports/{export_id}`. Capture uses Query
-Builder, no Eloquent models, observers, jobs, marketplace clients or resolvers.
-MySQL uses one `REPEATABLE READ, READ ONLY` transaction and requires all captured
-tables to be InnoDB. SQLite uses one read transaction (including the test harness's
-outer transaction). The SELECT-only application guard covers the capture as well.
+Main CSV projects eBay DE and Ovoko only. Exactly one matching listing gives
+shortcut values; zero/multiple or unresolved eBay signals leave individual values
+NULL. The original DE detector is unchanged: explicit channel, account and
+locally stored marketplaceId signals must agree; URL domains are not evidence.
+A DE+FR pair still resolves the single DE listing. FR remains only in nested data.
 
-Tables: parts, cars, part_categories, storage_locations, part_images,
-marketplace_listings; optional marketplace_accounts (safe identity projection),
-marketplace_category_mappings, allegro_shipping_rates, part_translations and
-category_translations. Credentials are never selected from accounts. Of
-api_settings, only marketplace_id survives projection. Stored payloads pass the
-existing migration sanitization policy. No data is fetched from providers.
+Car identity is parts.car_id → cars.id; Ovoko ID is an additional identity.
+Car generation/year/engine/gearbox/fuel map to model_variant/production_year/
+engine_capacity_cm3 (cm³)/gearbox_type/fuel_type. No linked car yields NULL car
+object and convenience fields. Parts prices and recorded listing prices remain
+independent, with no conversion or fallback; parts.ebay_price is the PLN base.
+Local Allegro shipping ID requires one associated account and one matching rate.
+Store URLs still use configured Polish app.url plus the named storefront.product
+route `/produkt/{slug}`, with local ID fallback. Legacy URL/slugs are preserved.
+A constructed URL does not promise availability for a sold/hidden part.
 
-`czesci`: all parts; `sprzedane`: status=sold; `do_wystawienia`: needs_listing=true.
-No stock, storefront visibility or listing inference changes those rules.
+## Capture, checkpoint and safety
 
-Sample selects up to five rows from the first 100 eligible IDs in the requested set, ranking car/category/storage,
-description, photos (including multiple photos), price, priced listings, explicit
-DE listings and Ovoko listings. Ties use ascending part ID. There is no randomness.
-Selected IDs appear in status and the manifest. With fewer than five eligible rows,
-all available rows are exported. Full always creates its own ID and fresh capture.
+Data acquisition is unchanged: new ID and fresh Query Builder capture each time,
+in one MySQL REPEATABLE READ / READ ONLY transaction (InnoDB required), or a SQLite
+read transaction in tests. No Eloquent save/observers, jobs, marketplace clients,
+provider GET/WRITE or external resolver. Optional tables may be absent.
+Części exports all parts; Sprzedane uses status=sold; Do wystawienia uses
+needs_listing=true. Sample ranks at most the first 100 eligible IDs and captures
+at most five selected parts and only their local relations. Full never adopts
+sample data. Capture reads batches of 100 parts into a private JSONL file, sealed
+only after the transaction succeeds. CSV projection reads at most 25 parts per
+tick, with memory bounded by one captured part during projection.
 
-Rows are captured in batches of 100 parts with related rows loaded only for those
-IDs. Memory scales with one batch and its relations, not the whole catalog; an
-exceptionally large individual product/gallery still costs memory. A private
-newline-delimited capture is sealed only after the transaction succeeds. Metadata
-includes database capture time, finish time, schema inventory, source Git commit,
-schema version and SHA256. Revision metadata is read through PHP/configuration, without executing Git; ZIP deployments without it are marked unavailable.
+Output offsets and counters are atomically checkpointed. Resume truncates any
+uncommitted CSV tail and verifies the capture hash. Stop pauses between projection
+ticks. Reload retains ID locally and reads server state. A live DB transaction
+cannot span requests: interrupted capture requires a new export. External worker
+kills/timeouts cannot guarantee a final receipt. Production timing is not asserted.
 
-CSV projection runs in ticks of at most 25 parts. It uses only the new capture,
-not the database. Byte offsets are committed atomically in a private checkpoint;
-uncommitted tails are truncated on the next tick. Stop pauses projection between
-ticks. Resume verifies the capture hash. Reload retains export ID in per-user
-localStorage and reads authoritative server state; a capturing run is polled.
+Version 1 exports are not resumed or silently upgraded to the new column layout.
+Their files/checkpoints are left intact; prepare a new export for version 2.
+Version 1 helper CSV downloads are no longer exposed by this exporter.
 
-A live database transaction cannot be resumed across HTTP requests. Capture runs
-in one request, ignores browser disconnects, and disables PHP's execution timer.
-An external worker/proxy kill or capture failure requires a **new export**; partial
-captures are never adopted. Stop/Resume apply to CSV projection, not to a running
-DB transaction. Deployments must allow the capture request to complete; a very
-large catalog may need a dedicated worker in a later change. This implementation
-does not claim a multi-request atomic snapshot or silently reuse old membership.
-No deployment settings are changed here.
+The manifest contains export identity, capture times, source_commit/status,
+schema_version, record/image/listing/issue counts, capture hash, the single CSV's
+SHA256/bytes and exact ordered columns. Revision comes from configuration
+GPSWISS_PRODUCT_EXPORT_SOURCE_COMMIT or PHP-local .git metadata, without a
+subprocess. Missing revision metadata is explicitly unavailable, never guessed.
 
-## Relationship semantics
+CSV uses UTF-8 BOM, `;`, double-quote escaping, JSON for arrays/objects, `\N` for
+NULL and doubled leading backslashes for literal values. Values beginning with
+whitespace/control characters then =,+,@,- receive an apostrophe formula guard.
+Importers must reverse these conventions and treat IDs/codes as text. Excel's
+automatic type inference can destroy leading zeros.
 
-Primary car relationship is parts.car_id → cars.id; source/external IDs and Ovoko
-car identity remain additional identifiers. Car generation uses model_variant,
-year production_year, engine engine_capacity_cm3 (cm³), gearbox gearbox_type,
-fuel fuel_type. Missing columns/values remain NULL. vehicle_snapshot is retained,
-and its steering_side takes precedence over cars.steering_side. part_position
-uses review_metadata.part_position, then legacy_payload.part_position/position.
-
-Allegro category is emitted only for one distinct locally mapped Allegro category.
-Shipping rate requires exactly one associated Allegro account from local listings
-and exactly one matching rate name for that account. No hardcoded fallback or
-resolver call is made. A rate name does not reconstruct carrier prices/settings.
-
-Main CSV projects **only eBay DE and Ovoko** listing shortcuts. eBay classification
-collects explicit ebay_de/ebay_fr channel/account codes and locally stored
-marketplaceId/marketplace_id (including offer.marketplaceId), plus account
-api_settings.marketplace_id. All signals must agree. URL domains are never used
-for classification. Unresolved/conflicting eBay records suppress the DE shortcut
-conservatively and generate an issue. A DE+FR pair correctly yields one DE row.
-Exactly one matching listing gives a shortcut; zero/multiple yields NULL values.
-`listing_count` is the number of confidently classified matching records.
-`resolution_status` and `listing_resolution_status` are equivalent explicit aliases:
-unique, missing, multiple, or market_unresolved (eBay).
-
-Prices from parts and prices from listings are independent; no conversion or
-fallback overwrites them. parts.ebay_price is the locally stored PLN base, not
-an EUR DE offer price. Listing prices retain their own currency and timestamps.
-No stored value is described as remotely verified/current at the provider.
-
-## Store URLs
-
-Actual public route: `storefront.product`, `GET /produkt/{slug}`. PartController
-accepts a slug or local ID, and applies storefront visibility rules. store_url
-uses configured app.url only when it identifies the configured Polish storefront;
-otherwise NULL. Routing comes from the named route; slug falls back to local ID.
-A URL is an identity candidate for redirect mapping, **not a promise of HTTP 200**
-(sold/hidden parts can be unavailable). No storefront request is sent. Original
-legacy_url, legacy_slug and slug are preserved separately.
-
-## Files and import encoding
-
-- Exactly one of czesci.csv, sprzedane.csv, do_wystawienia.csv, identical headers.
-- zdjecia_czesci.csv: only selected parts; exact stored paths, original image IDs,
-  sort_order/is_primary and deterministic import_order (primary first, then sort
-  order, image ID and path). Code photos are included. No disk scan/copy/download.
-- marketplace_listingi_czesci.csv: all locally associated listings, including FR
-  and historical Allegro, only for selected parts. Full sanitized source metadata.
-- relacje_czesci.csv: per-part car/category/location records, mappings and translations
-  to avoid losing reference data that has no flat convenience column.
-- issues.csv: missing/orphan relations, missing images/paths, ambiguous listings,
-  eBay classification conflicts, missing shortcut URLs and ambiguous categories.
-- manifest.json: identity, selection, times, commit, schema, counts, capture hash,
-  file hashes and exact ordered column lists.
-
-Photo source_path is the authoritative key together with part_id/image_id; basename
-is only a label. copy_relative_path strips known public-storage prefixes only and
-rejects absolute/remote/traversal paths. Physical existence is not asserted.
-Preserve directory structure when copying files. Presentation variants remain in
-image source_metadata; this manifest enumerates original gallery/code images,
-not every generated thumbnail. Files without a DB relationship cannot be assigned
-by guesswork. No old photo-pipeline files are touched.
-
-CSV: UTF-8 BOM, semicolon delimiter, RFC-style double-quoted fields, JSON for
-arrays/objects, `\N` for NULL, leading backslash doubled for literal values.
-Values starting with whitespace/control characters then =,+,@,- receive a leading
-apostrophe against formula injection. An importer must reverse these conventions
-(and remove the apostrophe only when this exact guard applies). IDs/SKUs/codes
-must be imported as text; opening CSV in Excel with automatic typing can destroy
-leading zeros. HTML/newlines are not truncated. Source parts JSON retains additional
-non-secret columns, and relationship JSON retains car/reference data.
+Private artifacts use directories 0700/files 0600; responses disable caching.
+Downloads verify hashes. Auth, owner isolation and filename allowlists apply.
+Per-operation safe diagnostics persist before risky phases and on exceptions in
+operation-{operation_id}.json and latest operation.json. Status polls never
+rewrite them. Receipts contain only export/action/phase, reason/category,
+exception class, table/relation/part ID, counts, checkpoint presence, last good
+phase, duration and peak memory. No SQL, messages, traces, credentials or payloads.
+MySQL ENGINE metadata keeps the explicit source_engine alias fixed in #1537.
 
 ## Verification
 
-PHPUnit feature tests cover each type in sample/full mode, identical columns,
-SELECT-only capture, zero HTTP calls, joins, local Ovoko car ID, photos/listings
-restricted to the selection, DE+FR, duplicate DE, conflicting market, prices,
-store URLs, fresh capture, stop/resume, output rollback, empty sets, authorization,
-owner isolation, download hashes and CSV encoding/escaping. Chromium test uses
-intercepted traffic only to exercise preparation, capture, failure, reload,
-Stop/Resume and download links. MySQL production-scale timing is not measured by
-SQLite tests; production is not started or queried.
+Tests cover all three datasets in sample/full modes; exactly one CSV on disk and
+in downloads; JSON roundtrip, image order/metadata, complete reference objects,
+ambiguous listings retained without shortcuts, FR confined to nested data,
+embedded issues, manifest hash, fresh capture, Stop/Resume, uncommitted tail
+rollback, safe diagnostics, auth, CSV encoding and SELECT-only/zero-provider scope.
+The MySQL test runs only on a disposable database named fresh_export_test.
+Chromium tests use intercepted requests; no production export or deployment.
 
 ## Exact main columns (ordered)
 
@@ -220,6 +188,15 @@ store_url
 image_count
 primary_image_path
 images_json
+marketplace_listings_json
+issues_count
+issues_json
+car_json
+category_json
+storage_location_json
+category_mappings_json
+part_translations_json
+category_translations_json
 legacy_payload
 review_metadata
 source_part_json
@@ -252,51 +229,3 @@ ovoko_listing_currency
 ovoko_last_synced_at
 ovoko_last_seen_at
 ```
-
-## Failure diagnostics and MySQL compatibility follow-up
-
-The #1536 engine check used `pluck('engine')` against information_schema.tables.
-MySQL 8.4 returns the unaliased label `ENGINE`; Laravel then raises ErrorException
-when accessing `$row->engine`. The regression test reproduces this exact old
-expression, and the fixed code uses `ENGINE AS source_engine`. This happens
-before sample selection or capture file creation. This is a locally reproduced
-code defect; without a production receipt/log it is not proof of which failure
-the reported production request encountered.
-
-The exact SET TRANSACTION / beginTransaction ordering is exercised against real,
-isolated MySQL 8.4. A raw write in that transaction is rejected with error 1792.
-The integration fixture is synthetic and has NULL relationships and no optional
-tables. Tests require the disposable database name `fresh_export_test` and do not
-connect to a production database.
-
-Sample ranking now considers at most the first 100 eligible IDs in ascending
-order, then selects at most five by the existing completeness score. The query
-never ranks the entire product catalog. Capture remains limited to the selected
-five IDs and their local relations. No broad data capture precedes selection.
-
-Prepare no longer executes Git or depends on proc_open: source revision is read
-from `GPSWISS_PRODUCT_EXPORT_SOURCE_COMMIT` configuration or local .git files via
-PHP. In a ZIP deployment without revision metadata it is NULL, explicitly marked
-source_commit_status=unavailable; it is never guessed. Configure the verified
-release SHA when that metadata is required. No deploy helper is modified here.
-
-Each mutating operation persists a unique `operation-{operation_id}.json` receipt
-and the latest `operation.json`, with export_id, action, phase,
-reason_code, backend_exception_class, safe_exception_category, current_table,
-current_join, current_part_id, capture_processed, selected_products,
-checkpoint_present, last_successful_phase, duration_ms and memory_peak_bytes.
-Phases are persisted **before** risky calls. Read-only status polling returns
-this receipt without rewriting it. Exceptions return a JSON receipt immediately;
-UI displays it even if the operation failed before its normal response. The
-receipt never stores exception messages, SQL/bindings, trace, tokens or payloads.
-Serialization errors and common SQLSTATE/schema/permission/timeout categories
-are classified without exposing their text. A shutdown callback reserves memory
-for a best-effort fatal receipt; SIGKILL, worker loss or an unwritable filesystem
-cannot guarantee a final receipt. A last `running` phase indicates interruption,
-not success. If the private directory cannot be written, safe metadata falls back
-to PHP's error log; durable artifact storage is then unavailable.
-
-The deployment archive path has no .git, so #1536's source revision lookup was a
-separate preparation failure mode. It is covered without invoking a subprocess.
-Known engine compatibility and diagnostics gaps are fixed here; the historical
-production incident remains unconfirmed without its existing log/checkpoint.

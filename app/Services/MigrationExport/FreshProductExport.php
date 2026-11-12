@@ -250,6 +250,9 @@ final class FreshProductExport
             $s = $this->load($dir, $owner);
             $this->operation?->counts($s['capture_processed'] ?? 0, $s['total']);
             $this->phase('action_start');
+            if ($s['schema_version'] !== ProductExportProjection::VERSION) {
+                throw new MigrationExportException('export_schema_changed_prepare_new_export');
+            }
             if (! in_array($action, ['capture', 'tick', 'resume', 'stop'], true)) {
                 throw new MigrationExportException('invalid_export_action', 422);
             }
@@ -285,7 +288,7 @@ final class FreshProductExport
 
     private function emit(string $dir, array &$s): void
     {
-        $definitions = [$s['type'].'.csv' => ProductExportProjection::columns(), 'zdjecia_czesci.csv' => ProductExportProjection::PHOTOS, 'marketplace_listingi_czesci.csv' => ProductExportProjection::RELATIONS, 'issues.csv' => ['part_id', 'reason_code', 'details'], 'relacje_czesci.csv' => ['part_id', 'car', 'category', 'location', 'mappings', 'translations', 'category_translations']];
+        $definitions = [$s['type'].'.csv' => ProductExportProjection::columns()];
         foreach ($definitions as $name => $columns) {
             $stream = fopen($dir.'/'.$name, 'c+b');
             chmod($dir.'/'.$name, 0600);
@@ -306,11 +309,8 @@ final class FreshProductExport
                 $data = json_decode($line, true, 512, JSON_THROW_ON_ERROR | JSON_BIGINT_AS_STRING);
                 $this->phase('csv_projection', 'parts', (string) $data['part']['id']);
                 $out = ProductExportProjection::project($data);
-                foreach ([$s['type'].'.csv' => [$out['part']], 'zdjecia_czesci.csv' => $out['photos'], 'marketplace_listingi_czesci.csv' => $out['listings'], 'issues.csv' => $out['issues'], 'relacje_czesci.csv' => [['part_id' => $data['part']['id']] + $data]] as $name => $rows) {
-                    foreach ($rows as $row) {
-                        $this->append($dir, $s, $name, $this->csv(array_map(fn ($c) => $row[$c] ?? null, $definitions[$name])));
-                    }
-                }
+                $name = $s['type'].'.csv';
+                $this->append($dir, $s, $name, $this->csv(array_map(fn ($c) => $out['part'][$c] ?? null, $definitions[$name])));
                 $s['processed']++;
                 $s['images'] += count($out['photos']);
                 $s['listings'] += count($out['listings']);
@@ -337,7 +337,7 @@ final class FreshProductExport
     {
         $dir = $this->directory($id);
         $s = $this->load($dir, $owner);
-        if ($s['state'] !== 'done' || ! isset($s['files'][$file])) {
+        if ($s['schema_version'] !== ProductExportProjection::VERSION || $s['state'] !== 'done' || ! in_array($file, [$s['type'].'.csv', 'manifest.json'], true) || ! isset($s['files'][$file])) {
             throw new MigrationExportException('export_file_unavailable', 404);
         }
         if (! hash_equals($s['files'][$file]['sha256'], (string) hash_file('sha256', $dir.'/'.$file))) {
@@ -430,6 +430,11 @@ final class FreshProductExport
 
     private function reply(array $s): array
     {
+        if ($s['schema_version'] !== ProductExportProjection::VERSION) {
+            $s['files'] = [];
+            $s['state'] = 'schema_changed';
+            $s['error'] = 'export_schema_changed_prepare_new_export';
+        }
         $diagnostic = $this->operation?->receipt();
         if (($diagnostic['export_id'] ?? null) !== $s['export_id']) {
             $diagnostic = null;

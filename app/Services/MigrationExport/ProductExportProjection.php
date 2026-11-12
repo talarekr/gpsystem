@@ -5,15 +5,11 @@ namespace App\Services\MigrationExport;
 /** Pure projections of locally captured data; deliberately no models, resolvers or HTTP clients. */
 final class ProductExportProjection
 {
-    public const VERSION = 'gpswiss-products-1';
+    public const VERSION = 'gpswiss-products-2';
 
-    public const BASE = 'part_id source_system external_id sku part_number oem_number manufacturer_code additional_part_codes status quantity needs_listing needs_review is_visible_storefront sale_source sold_at created_at updated_at name short_description description condition_notes internal_note category_id category_name category_path allegro_category_id allegro_category_source part_position steering_side steering_side_source weight_kg length_cm width_cm height_cm storage_location_id storage_location_name storage_location_description car_id car_source_system car_external_id ovoko_car_id car_make car_model car_generation car_year car_vin car_engine car_engine_code car_gearbox car_gearbox_code car_fuel car_body_type vehicle_snapshot store_price store_currency allegro_price ovoko_price ebay_price allegro_shipping_rate_name allegro_shipping_rate_id allegro_shipping_account_id store_legacy_url store_slug store_legacy_slug store_url image_count primary_image_path images_json legacy_payload review_metadata source_part_json';
+    public const BASE = 'part_id source_system external_id sku part_number oem_number manufacturer_code additional_part_codes status quantity needs_listing needs_review is_visible_storefront sale_source sold_at created_at updated_at name short_description description condition_notes internal_note category_id category_name category_path allegro_category_id allegro_category_source part_position steering_side steering_side_source weight_kg length_cm width_cm height_cm storage_location_id storage_location_name storage_location_description car_id car_source_system car_external_id ovoko_car_id car_make car_model car_generation car_year car_vin car_engine car_engine_code car_gearbox car_gearbox_code car_fuel car_body_type vehicle_snapshot store_price store_currency allegro_price ovoko_price ebay_price allegro_shipping_rate_name allegro_shipping_rate_id allegro_shipping_account_id store_legacy_url store_slug store_legacy_slug store_url image_count primary_image_path images_json marketplace_listings_json issues_count issues_json car_json category_json storage_location_json category_mappings_json part_translations_json category_translations_json legacy_payload review_metadata source_part_json';
 
     public const LISTING = 'listing_local_id external_listing_id external_offer_id marketplace_account_id account_code url status listing_price listing_currency last_synced_at last_seen_at';
-
-    public const PHOTOS = ['part_id', 'image_id', 'original_name', 'source_path', 'sort_order', 'is_primary', 'role', 'source_type', 'mime_type', 'extension', 'import_order', 'copy_relative_path', 'source_metadata'];
-
-    public const RELATIONS = ['part_id', 'listing_local_id', 'marketplace', 'marketplace_account_id', 'account_code', 'resolved_market', 'market_resolution_status', 'external_listing_id', 'external_offer_id', 'external_inventory_id', 'sku', 'url', 'status', 'price', 'currency', 'last_synced_at', 'last_seen_at', 'source_metadata'];
 
     public static function columns(): array
     {
@@ -96,7 +92,7 @@ final class ProductExportProjection
         $photos = self::photos($p, $capture['images'], $issues);
         $row['image_count'] = count($photos);
         $row['primary_image_path'] = $photos[0]['source_path'] ?? null;
-        $row['images_json'] = array_map(fn ($i) => array_diff_key($i, ['source_metadata' => true]), $photos);
+        $row['images_json'] = $photos;
         $relations = [];
         $groups = ['ebay_de' => [], 'ovoko' => []];
         $ebayConflict = false;
@@ -151,7 +147,18 @@ final class ProductExportProjection
         $row['allegro_shipping_rate_id'] = count($rates) === 1 ? $rates[0]['shipping_rate_id'] : null;
         $row['allegro_shipping_account_id'] = count($rates) === 1 ? $rates[0]['marketplace_account_id'] : null;
 
-        return ['part' => $row, 'photos' => $photos, 'listings' => $relations, 'issues' => array_map(fn ($i) => ['part_id' => $p['id']] + $i, $issues)];
+        $issues = array_map(fn ($i) => ['part_id' => $p['id']] + $i, $issues);
+        $row['marketplace_listings_json'] = $relations;
+        $row['issues_count'] = count($issues);
+        $row['issues_json'] = $issues;
+        $row['car_json'] = $capture['car'] ?? null;
+        $row['category_json'] = $capture['category'] ?? null;
+        $row['storage_location_json'] = $capture['location'] ?? null;
+        $row['category_mappings_json'] = $capture['mappings'];
+        $row['part_translations_json'] = $capture['translations'] ?? [];
+        $row['category_translations_json'] = $capture['category_translations'] ?? [];
+
+        return ['part' => $row, 'photos' => $photos, 'listings' => $relations, 'issues' => $issues];
     }
 
     private static function photos(array $part, array $images, array &$issues): array
