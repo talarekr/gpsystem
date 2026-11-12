@@ -130,6 +130,68 @@ class FreshProductExportTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_to_list_sample_five_and_full_match_parts_contract_without_extra_filters(): void
+    {
+        // All five must qualify despite stock/status/visibility and existing DE/Ovoko offers.
+        DB::table('parts')->update(['needs_listing' => false]);
+        foreach (['sold', 'draft', 'archived', 'ready', 'published'] as $index => $status) {
+            DB::table('parts')->where('id', $index + 1)->update([
+                'needs_listing' => true, 'status' => $status,
+                'quantity' => $index % 2 === 0 ? 0 : 3, 'is_visible_storefront' => false,
+            ]);
+        }
+        DB::table('part_images')->where('part_id', 1)->update([
+            'path' => 'parts/photos/imported/1/original.jpg',
+            'legacy_payload' => '{"presentation":{"product_path":"parts/photos/presentation/product/example.jpg"}}',
+        ]);
+        DB::table('part_images')->insert(['part_id' => 1, 'path' => 'parts/photos/admin/1/second.jpg', 'sort_order' => 2]);
+        $queries = [];
+        DB::listen(function ($e) use (&$queries) {
+            $queries[] = $e->sql;
+        });
+        $headers = [];
+        foreach (['sample', 'full'] as $mode) {
+            $parts = $this->finish($this->start('czesci', $mode));
+            $toList = $this->finish($this->start('do_wystawienia', $mode));
+            $partsRows = $this->csv($parts, 'czesci.csv');
+            $toListRows = $this->csv($toList, 'do_wystawienia.csv');
+            $this->assertCount($mode === 'sample' ? 5 : 15, $partsRows);
+            $this->assertCount(5, $toListRows);
+            $this->assertSame(['1', '2', '3', '4', '5'], array_column($toListRows, 'part_id'));
+            $this->assertCount(108, array_keys($toListRows[0]));
+            $this->assertSame(array_keys($partsRows[0]), array_keys($toListRows[0]));
+            $partsById = array_column($partsRows, null, 'part_id');
+            foreach ($toListRows as $row) {
+                $this->assertSame($partsById[$row['part_id']], $row);
+            }
+            foreach ([$parts, $toList] as $export) {
+                $file = $export['type'].'.csv';
+                $this->assertSame([$file, 'manifest.json'], array_keys($export['files']));
+                $this->assertSame('gpswiss-products-2', $export['schema_version']);
+                $manifest = json_decode(file_get_contents($this->root.'/'.$export['export_id'].'/manifest.json'), true);
+                $this->assertSame('gpswiss-products-2', $manifest['schema_version']);
+                $this->assertSame(ProductExportProjection::columns(), $manifest['columns'][$file]);
+                $stream = fopen($this->root.'/'.$export['export_id'].'/'.$file, 'rb');
+                $headers[] = fgets($stream);
+                fclose($stream);
+            }
+            $images = json_decode($toListRows[0]['images_json'], true, 512, JSON_THROW_ON_ERROR);
+            $this->assertCount(2, $images);
+            $this->assertSame('parts/photos/imported/1/original.jpg', $images[0]['source_path']);
+            $this->assertSame('parts/photos/admin/1/second.jpg', $images[1]['source_path']);
+            $this->assertSame('parts/photos/presentation/product/example.jpg', $images[0]['source_metadata']['legacy_payload']['presentation']['product_path']);
+            $this->assertSame([1, 2], array_column($images, 'import_order'));
+            foreach (['image_id', 'original_name', 'source_path', 'sort_order', 'is_primary', 'role', 'source_type', 'mime_type', 'extension', 'import_order'] as $key) {
+                $this->assertArrayHasKey($key, $images[0]);
+            }
+        }
+        $this->assertCount(1, array_unique($headers), 'Sample/full headers must be byte-identical across both datasets.');
+        foreach ($queries as $sql) {
+            $this->assertMatchesRegularExpression('/^select\b/i', $sql);
+        }
+        Http::assertNothingSent();
+    }
+
     public function test_joins_prices_urls_photos_and_csv_roundtrip(): void
     {
         $s = $this->finish($this->start());
