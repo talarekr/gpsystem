@@ -133,6 +133,30 @@ rollback, safe diagnostics, auth, CSV encoding and SELECT-only/zero-provider sco
 The MySQL test runs only on a disposable database named fresh_export_test.
 Chromium tests use intercepted requests; no production export or deployment.
 
+## Owner-only photo storage paths (read only)
+
+The exporter page has a separate collapsible **Ścieżki oryginalnych zdjęć (tylko
+odczyt)** section. It renders on the page GET before any export is started. It
+shows only base_path(), storage_path(), storage_path('app/public'), public_path(),
+public_path('storage'), the part image disk name (`public`), its effective
+configured local root, and the fixed example's DB path → disk → resolved absolute
+path → exists boolean. It does not claim that the example is present in the DB.
+The fixed example is `parts/photos/imported/2082/031bef934b8f88568ccbe2875db3.jpg`.
+
+This reads the running server's helpers/configuration and filesystem metadata,
+not staging defaults. The example resolves existing symlinks with realpath; a
+missing file still has its computed target path. exists means is_file visible to
+PHP at that disk location; historical public_html mirrors are not scanned.
+No .env content, credentials, tokens or complete filesystem configuration is
+returned. Data is escaped in HTML and the page has private/no-store and noindex
+headers. Existing OwnerAdmin and read-only DB/session guards protect the page.
+
+The diagnostic uses pure path prefixing, realpath and is_file. It deliberately
+does not instantiate a Storage disk: Flysystem's local adapter can create a
+missing root during construction. A non-local configured public disk is rejected
+without contacting a remote provider. No export, models/DB reads, file writes,
+copy, repair or image processor is invoked by this diagnostic.
+
 ## Exact main columns (ordered)
 
 ```text

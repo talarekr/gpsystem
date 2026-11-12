@@ -6,6 +6,7 @@ use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
 use App\Services\MigrationExport\FreshProductExport;
 use App\Services\MigrationExport\MigrationExportException;
+use App\Services\MigrationExport\PartPhotoStorageDiagnostic;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 
@@ -31,7 +32,9 @@ final class FreshProductExportController extends Controller
             } elseif ($export) {
                 $data = $exports->status($owner, $export);
             } else {
-                return response()->view('admin.tools.product-migration-export')->header('Cache-Control', 'private, no-store');
+                return response()->view('admin.tools.product-migration-export', [
+                    'photoStorageDiagnostic' => app(PartPhotoStorageDiagnostic::class)->inspect(),
+                ])->header('Cache-Control', 'private, no-store')->header('X-Robots-Tag', 'noindex, noarchive')->header('X-Content-Type-Options', 'nosniff');
             }
 
             $data['diagnostic'] = $exports->failureReceipt() ?? ($data['diagnostic'] ?? null);
