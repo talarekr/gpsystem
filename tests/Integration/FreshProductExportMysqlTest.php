@@ -3,6 +3,7 @@
 namespace Tests\Integration;
 
 use App\Services\MigrationExport\FreshProductExport;
+use App\Services\MigrationExport\PartPhotoStorageDiagnostic;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
@@ -139,5 +140,25 @@ class FreshProductExportMysqlTest extends TestCase
         $this->expectException(\ErrorException::class);
         // Exact #1536 expression: MySQL returns ENGINE, not engine, without an alias.
         DB::table('information_schema.tables')->where('table_schema', DB::connection()->getDatabaseName())->whereIn('table_name', ['parts'])->pluck('engine');
+    }
+
+    public function test_photo_audit_uses_real_mysql_rows_without_optional_payload_column(): void
+    {
+        DB::table('part_images')->insert(['id' => 20081, 'part_id' => 1, 'path' => 'parts/photos/imported/mysql-audit/original.jpg']);
+        $queries = [];
+        DB::listen(function ($e) use (&$queries) {
+            $queries[] = $e->sql;
+        });
+        $data = (new PartPhotoStorageDiagnostic)->inspect();
+        $this->assertSame('selected', $data['sample_status']);
+        $this->assertSame(['20081', '1'], array_column($data['sample_images'], 'image_id'));
+        $this->assertSame('parts/photos/imported/mysql-audit/original.jpg', $data['sample_images'][0]['db_path']);
+        $this->assertNull($data['sample_images'][0]['legacy_presentation']['product_path']);
+        $this->assertSame('image_id_hint_only_not_verified', $data['known_product']['source_match']);
+        $this->assertNull($data['known_product']['original']);
+        foreach ($queries as $sql) {
+            $this->assertMatchesRegularExpression('/^select\b/i', $sql);
+        }
+        Http::assertNothingSent();
     }
 }

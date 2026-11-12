@@ -10,8 +10,8 @@
 <p id="counts"></p><p id="sample"></p><button id="resume" disabled>Resume — wznów</button><button id="stop" disabled>Stop</button>
 <p id="error" role="alert"></p><ul id="files"></ul><details><summary>Diagnostyka</summary><pre id="diagnostics"></pre></details>
 <details id="photo-storage"><summary>Ścieżki oryginalnych zdjęć (tylko odczyt)</summary>
-<p>Ścieżki tego serwera. Przykład to stała wartość ścieżki, bez wyszukiwania rekordu w bazie. Sprawdzamy plik na dysku public; inne historyczne lokalizacje nie są tutaj skanowane.</p>
-<p>Gdy plik istnieje, ścieżka resolved_absolute_path uwzględnia symlinki. exists: false oznacza brak pliku widocznego pod tą ścieżką dla procesu PHP.</p>
+<p>Audyt maksymalnie 5 rzeczywistych zdjęć z bazy oraz wskazanego wariantu produktu. Dla original, product i listing sprawdzamy wyłącznie konkretne ścieżki w katalogach obsługiwanych przez kod GPSwiss. Bez skanowania katalogów i pobierania URL.</p>
+<p>exists dotyczy dysku public; candidates i found_paths pokazują również lokalne mirrory. source_match potwierdza powiązanie wariantu z oryginałem tylko przy zgodności ścieżki w bazie. Kilka kopii nie oznacza zgodnej zawartości. To audyt próbki, nie dowód kompletności wszystkich zdjęć; brak pliku może też oznaczać brak dostępu dla PHP.</p>
 <pre id="photo-storage-diagnostic" style="white-space:pre-wrap;overflow-wrap:anywhere">{{ json_encode($photoStorageDiagnostic, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) }}</pre>
 </details>
 </main><script>
