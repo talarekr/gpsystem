@@ -40,10 +40,13 @@ class PartPhotoStorageDiagnosticTest extends TestCase
     {
         config(['filesystems.disks.public.secret' => 'SECRET_FILESYSTEM', 'filesystems.disks.s3.key' => 'SECRET_OTHER_DISK']);
         Storage::shouldReceive('disk')->never();
-        DB::connection()->beforeExecuting(fn () => throw new \LogicException('SQL forbidden in diagnostic'));
+        $queries = [];
+        DB::listen(function ($e) use (&$queries) {
+            $queries[] = $e->sql;
+        });
         $data = (new PartPhotoStorageDiagnostic)->inspect();
-        $this->assertSame(['base_path', 'storage_path', 'storage_path_app_public', 'public_path', 'public_path_storage', 'part_images_disk', 'disk_root', 'example'], array_keys($data));
-        $this->assertSame(['db_path', 'disk', 'resolved_absolute_path', 'exists'], array_keys($data['example']));
+        $this->assertSame(['base_path', 'storage_path', 'storage_path_app_public', 'public_path', 'public_path_storage', 'part_images_disk', 'disk_root', 'example', 'known_roots', 'known_product', 'sample_status', 'sample_images', 'original_locations', 'scope'], array_keys($data));
+        $this->assertSame(['db_path', 'disk', 'resolved_absolute_path', 'exists', 'relative_path', 'path_status', 'candidates', 'found_paths', 'resolution_status'], array_keys($data['example']));
         $this->assertSame(base_path(), $data['base_path']);
         $this->assertSame(storage_path(), $data['storage_path']);
         $this->assertSame(storage_path('app/public'), $data['storage_path_app_public']);
@@ -57,6 +60,9 @@ class PartPhotoStorageDiagnosticTest extends TestCase
         $this->assertFalse($data['example']['exists']);
         $this->assertDirectoryDoesNotExist($this->root);
         $this->assertStringNotContainsString('SECRET', json_encode($data));
+        foreach ($queries as $sql) {
+            $this->assertMatchesRegularExpression('/^select\b/i', $sql);
+        }
         Http::assertNothingSent();
     }
 
@@ -113,6 +119,122 @@ class PartPhotoStorageDiagnosticTest extends TestCase
         }
         $this->assertDirectoryDoesNotExist($this->root);
         Http::assertNothingSent();
+    }
+
+    private function image(int $id, string $path, array $presentation = [], string $source = 'test'): void
+    {
+        DB::table('parts')->insertOrIgnore(['id' => 1, 'name' => 'Synthetic part']);
+        DB::table('part_images')->insert(['id' => $id, 'part_id' => 1, 'path' => $path, 'source_system' => $source, 'legacy_payload' => json_encode(['presentation' => $presentation, 'credentials' => 'SECRET_PAYLOAD'])]);
+    }
+
+    private function fixture(string $root, string $relative): string
+    {
+        $path = $root.'/'.$relative;
+        File::makeDirectory(dirname($path), 0755, true, true);
+        file_put_contents($path, 'unchanged fixture');
+
+        return $path;
+    }
+
+    public function test_five_real_rows_and_exact_known_product_find_original_in_mirror_only(): void
+    {
+        $original = 'parts/photos/imported/actual/source.jpg';
+        $listing = str_replace('/product/', '/listing/', PartPhotoStorageDiagnostic::KNOWN_PRODUCT);
+        $this->image(20081, $original, ['product_path' => PartPhotoStorageDiagnostic::KNOWN_PRODUCT, 'listing_path' => $listing, 'source_path' => $original]);
+        for ($id = 1; $id <= 8; $id++) {
+            $this->image($id, 'parts/photos/imported/'.$id.'/actual.jpg');
+        }
+        $mirror = $this->root.'/mirror';
+        config(['filesystems.served_public_storage_root' => $mirror]);
+        $file = $this->fixture($mirror, $original);
+        $this->fixture($mirror, PartPhotoStorageDiagnostic::KNOWN_PRODUCT);
+        $this->fixture($this->root, $listing);
+        $before = hash_file('sha256', $file);
+        $queries = [];
+        DB::listen(function ($e) use (&$queries) {
+            $queries[] = $e->sql;
+        });
+        Storage::shouldReceive('disk')->never();
+        $data = (new PartPhotoStorageDiagnostic)->inspect();
+        $this->assertCount(5, $data['sample_images']);
+        $this->assertSame(['20081', '1', '2', '3', '4'], array_column($data['sample_images'], 'image_id'));
+        $row = $data['sample_images'][0];
+        $this->assertSame('1', $row['part_id']);
+        $this->assertSame($original, $row['db_path']);
+        $this->assertFalse($row['exists']);
+        $this->assertSame([realpath($file)], $row['original']['found_paths']);
+        $this->assertFalse($row['product']['exists']);
+        $this->assertNotEmpty($row['product']['found_paths']);
+        $this->assertTrue($row['listing']['exists']);
+        $this->assertSame('exact_stored_product_path', $data['known_product']['source_match']);
+        $this->assertSame($original, $data['known_product']['original']['db_path']);
+        $this->assertNotEmpty($data['known_product']['product']['found_paths']);
+        $this->assertSame($listing, $data['known_product']['listing']['relative_path']);
+        $this->assertSame(realpath($file), $data['original_locations'][0]['files'][0]['resolved_absolute_path']);
+        $this->assertSame($before, hash_file('sha256', $file));
+        $this->assertStringNotContainsString('SECRET_PAYLOAD', json_encode($data));
+        foreach ($queries as $sql) {
+            $this->assertMatchesRegularExpression('/^select\b/i', $sql);
+        }
+        $this->assertStringContainsString('limit 4', implode('\n', $queries));
+        Http::assertNothingSent();
+    }
+
+    public function test_stale_variant_does_not_invent_corresponding_original(): void
+    {
+        $this->image(20081, 'parts/photos/original.jpg', ['product_path' => 'parts/photos/presentation/product/20081-other.jpg']);
+        $this->fixture($this->root, PartPhotoStorageDiagnostic::KNOWN_PRODUCT);
+        $data = (new PartPhotoStorageDiagnostic)->inspect();
+        $this->assertTrue($data['known_product']['product']['exists']);
+        $this->assertSame('image_id_hint_only_not_verified', $data['known_product']['source_match']);
+        $this->assertNull($data['known_product']['original']);
+    }
+
+    public function test_remote_unsafe_paths_and_hidden_payload_are_not_probed_or_exposed(): void
+    {
+        $this->image(1, 'https://external.invalid/secret.jpg?token=SECRET_TOKEN', ['source_path' => '../../.env']);
+        $this->image(2, '../outside.jpg');
+        $this->image(3, 'parts/photos/token=SECRET_LOCAL.jpg');
+        $data = (new PartPhotoStorageDiagnostic)->inspect();
+        $this->assertSame('remote_or_unmapped_url_not_fetched', $data['sample_images'][0]['original']['path_status']);
+        $this->assertSame([], $data['sample_images'][0]['original']['candidates']);
+        $this->assertSame([], $data['sample_images'][0]['presentation_source']['candidates']);
+        $this->assertSame('unsafe_path', $data['sample_images'][1]['original']['path_status']);
+        $this->assertSame([], $data['sample_images'][1]['original']['candidates']);
+        $this->assertSame('sensitive_path_not_probed', $data['sample_images'][2]['original']['path_status']);
+        $this->assertSame([], $data['sample_images'][2]['original']['candidates']);
+        $this->assertStringNotContainsString('SECRET', json_encode($data));
+        Http::assertNothingSent();
+    }
+
+    public function test_known_local_url_and_historical_flat_upload_candidates(): void
+    {
+        $this->image(1, 'https://gpswiss.pl/storage/parts/photos/flat.jpg?token=SECRET_TOKEN', [], 'workshop_quick_create');
+        $target = 'parts/photos/imported/1/flat.jpg';
+        $this->fixture($this->root, $target);
+        $data = (new PartPhotoStorageDiagnostic)->inspect();
+        $row = $data['sample_images'][0];
+        $this->assertSame('parts/photos/flat.jpg', $row['original']['relative_path']);
+        $this->assertFalse($row['original']['exists']);
+        $this->assertCount(2, $row['historical_candidates']);
+        $this->assertSame('workshop_original_copy', $row['historical_candidates'][1]['rule']);
+        $this->assertTrue($row['historical_candidates'][1]['lookup']['exists']);
+        $this->assertTrue($row['historical_candidates'][1]['candidate_only_not_content_verified']);
+        $this->assertStringNotContainsString('SECRET', json_encode($data));
+    }
+
+    public function test_distinct_copies_are_reported_without_selecting_one(): void
+    {
+        $relative = 'parts/photos/multiple.jpg';
+        $this->image(1, $relative);
+        $this->fixture($this->root, $relative);
+        $mirror = $this->root.'/mirror';
+        $this->fixture($mirror, $relative);
+        config(['filesystems.served_public_storage_root' => $mirror]);
+        $data = (new PartPhotoStorageDiagnostic)->inspect();
+        $original = $data['sample_images'][0]['original'];
+        $this->assertCount(2, $original['found_paths']);
+        $this->assertSame('multiple_physical_copies_not_compared', $original['resolution_status']);
     }
 
     public function test_remote_disk_cannot_trigger_provider_requests(): void

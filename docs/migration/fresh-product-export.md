@@ -133,29 +133,73 @@ rollback, safe diagnostics, auth, CSV encoding and SELECT-only/zero-provider sco
 The MySQL test runs only on a disposable database named fresh_export_test.
 Chromium tests use intercepted requests; no production export or deployment.
 
-## Owner-only photo storage paths (read only)
+## Owner-only photo storage audit (read only)
 
-The exporter page has a separate collapsible **Ścieżki oryginalnych zdjęć (tylko
-odczyt)** section. It renders on the page GET before any export is started. It
-shows only base_path(), storage_path(), storage_path('app/public'), public_path(),
-public_path('storage'), the part image disk name (`public`), its effective
-configured local root, and the fixed example's DB path → disk → resolved absolute
-path → exists boolean. It does not claim that the example is present in the DB.
-The fixed example is `parts/photos/imported/2082/031bef934b8f88568ccbe2875db3.jpg`.
+The exporter page's collapsible **Ścieżki oryginalnych zdjęć (tylko odczyt)** section
+now audits at most five real part_images records plus the two fixed paths supplied
+by the operator. It executes bounded SELECTs through Query Builder and the SELECT-only
+guard, never Eloquent models or image processors. It does not start an export.
+Only id, part_id, path, source_system and legacy_payload are selected; only the
+three presentation path fields are exposed from the payload. No complete payload,
+.env, credentials, tokens or filesystem configuration dump is returned.
 
-This reads the running server's helpers/configuration and filesystem metadata,
-not staging defaults. The example resolves existing symlinks with realpath; a
-missing file still has its computed target path. exists means is_file visible to
-PHP at that disk location; historical public_html mirrors are not scanned.
-No .env content, credentials, tokens or complete filesystem configuration is
-returned. Data is escaped in HTML and the page has private/no-store and noindex
-headers. Existing OwnerAdmin and read-only DB/session guards protect the page.
+Selection first reads image ID 20081 (the image-ID hint encoded by the existing
+processor in `parts/photos/presentation/product/20081-c609f1c66216.jpg`), if it exists,
+then the first four other image IDs. Without that row, it reads the first five IDs.
+The known product is linked to that row's original **only if the stored product_path
+matches the known path** after safe local-path normalization. The ID hint alone is
+explicitly unverified. No original filename is guessed from a derivative hash.
+The paired known listing filename follows the same-basename rule in
+PartImagePresentationService, and is labelled as derived from that rule, not a DB
+observation. The old imported example remains a separately labelled fixed probe.
 
-The diagnostic uses pure path prefixing, realpath and is_file. It deliberately
-does not instantiate a Storage disk: Flysystem's local adapter can create a
-missing root during construction. A non-local configured public disk is rejected
-without contacting a remote provider. No export, models/DB reads, file writes,
-copy, repair or image processor is invoked by this diagnostic.
+Each sample reports part/image ID, DB path, public disk target/exists, saved listing
+and product paths, and separate probes for DB original, product, listing and saved
+presentation.source_path. Each probe lists exact candidate paths, canonical paths,
+exists/readable, and all distinct physical files found. `exists` at the top of a
+probe still refers to the public disk; mirrors appear in candidates/found_paths.
+Multiple distinct copies are flagged as not content-compared; no automatic choice
+or equality claim is made. Files are not read for hashing.
+
+Only roots already used in application code are checked:
+
+| Root | Code evidence |
+| --- | --- |
+| Effective public disk root (including configured prefix) | config/filesystems.php, PartImageUploadService |
+| configured served_public_storage_root | PartImageUploadService::servedPublicStorageRoot, MigrationOriginals::roots |
+| public_path('storage') | PartImagePresentationService::sourcePathCandidates |
+| dirname(base_path())/public_html/storage | legacy CSV importer, presentation mirror and MigrationOriginals |
+| DOCUMENT_ROOT/storage, when available | legacy CSV importer and presentation source candidates |
+
+No directory is scanned or listed recursively. Each root is probed only with the
+fixed paths or explicit paths from the selected records. Local GPSwiss /storage/
+URLs may be normalized to keys without HTTP; external URLs, traversal, absolute DB
+paths and unsafe paths are not probed. URL credentials/query tokens are removed
+from display. is_file/realpath/is_readable are the only file inspections. No Storage
+adapter is created (its constructor could mkdir a missing root).
+
+The code also documents two concrete historical path changes: flat admin uploads
+move to parts/photos/admin/{part_id}/{filename} in PartImageUploadService; workshop
+repair can copy a flat workshop_quick_create source to
+parts/photos/imported/{part_id}/{filename} in WorkshopImageDiagnosticsController.
+Forward/reverse candidate paths are shown only for those exact patterns and source
+conditions, with candidate_only_not_content_verified=true. The audit does not run
+either move/repair and never treats a matching basename as proof of original bytes.
+The legacy CSV importer can copy originals straight into served public storage,
+so missing public-disk bytes do not establish that an original is lost.
+
+`original_locations` groups confirmed **sampled DB-original** files by canonical
+root directory and deduplicates symlink aliases. It gives an explicit relative-key
+to physical-file mapping and readability. Historical candidate/source_path probes
+remain separate, unverified alternatives. The scope is explicitly not a full image
+inventory: five records cannot prove that one directory contains every original.
+If a public URL works but all local candidates are absent, the audit reports that
+absence; it does not infer another host/CDN path or fetch the URL.
+
+OwnerAdmin authorization, escaped HTML, private/no-store and noindex headers remain.
+Tests cover mirror-only originals, original/listing/product independence, bounded
+real-row selection, stale ID hints, multiple copies, historical moves, URLs,
+traversal, sensitive-payload omission, symlinks, SELECT-only SQL and zero providers.
 
 ## Exact main columns (ordered)
 
