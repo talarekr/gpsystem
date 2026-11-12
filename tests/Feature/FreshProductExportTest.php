@@ -7,6 +7,7 @@ use App\Models\User;
 use App\Services\MigrationExport\FreshProductExport;
 use App\Services\MigrationExport\MigrationExportException;
 use App\Services\MigrationExport\ProductExportProjection;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
@@ -255,6 +256,61 @@ class FreshProductExportTest extends TestCase
         $s = $this->finish($s);
         $rows = $this->csv($s, 'czesci.csv');
         $this->assertCount(35, $rows);
-        $this->assertCount(35,array_unique(array_column($rows,'part_id')));
+        $this->assertCount(35, array_unique(array_column($rows, 'part_id')));
+    }
+
+    public function test_failed_capture_receipt_survives_status_without_sensitive_exception_text(): void
+    {
+        $service = app(FreshProductExport::class);
+        $s = $service->prepare(7, 'czesci', 'sample');
+        DB::connection()->beforeExecuting(function ($sql) {
+            if (str_contains($sql, 'select * from "part_images"')) {
+                $previous = new \PDOException('SECRET SQL customer payload credentials');
+                $previous->errorInfo = ['42S22', 1054, 'SECRET'];
+                throw new QueryException('test', $sql, ['SECRET'], $previous);
+            }
+        });
+        try {
+            $service->action(7, $s['export_id'], 'capture');
+            $this->fail('Failure not injected');
+        } catch (QueryException $e) {
+        }
+        $receipt = json_decode(file_get_contents($this->root.'/'.$s['export_id'].'/operation.json'), true);
+        $this->assertSame('capture', $receipt['action']);
+        $this->assertSame('relation_read', $receipt['phase']);
+        $this->assertSame('part_images', $receipt['current_table']);
+        $this->assertSame('missing_column', $receipt['safe_exception_category']);
+        $this->assertSame(QueryException::class, $receipt['backend_exception_class']);
+        $this->assertSame(5, $receipt['selected_products']);
+        $this->assertSame(0, $receipt['capture_processed']);
+        $this->assertTrue($receipt['checkpoint_present']);
+        $this->assertStringNotContainsString('SECRET', json_encode($receipt));
+        $this->assertStringNotContainsString('select ', strtolower(json_encode($receipt)));
+        $fresh = app(FreshProductExport::class);
+        // Construct a new service to represent a later status-poll request.
+        $fresh = new FreshProductExport;
+        $status = $fresh->status(7, $s['export_id']);
+        $this->assertSame('capture_failed', $status['state']);
+        $this->assertSame($receipt, $status['diagnostic']);
+        $this->assertSame($receipt, json_decode(file_get_contents($this->root.'/'.$s['export_id'].'/operation.json'), true));
+    }
+
+    public function test_controller_returns_safe_diagnostic_instead_of_generic_server_error(): void
+    {
+        $user = User::query()->create(['name' => 'Owner', 'email' => 'diag-owner@test.invalid', 'password' => 'password']);
+        $role = Role::findOrCreate(UserRole::OwnerAdmin->value, 'web');
+        $user->assignRole($role);
+        $url = '/admin/tools/product-migration-export';
+        $s = $this->actingAs($user)->postJson($url, ['action' => 'prepare', 'type' => 'czesci', 'mode' => 'sample'])->assertOk()->json();
+        DB::connection()->beforeExecuting(function ($sql) {
+            if (str_contains($sql, 'select * from "part_images"')) {
+                throw new \RuntimeException('SECRET exception with credentials');
+            }
+        });
+        $response = $this->postJson($url.'/'.$s['export_id'], ['action' => 'capture'])->assertStatus(500);
+        $response->assertJsonPath('diagnostic.action', 'capture')->assertJsonPath('diagnostic.phase', 'relation_read')->assertJsonPath('diagnostic.current_table', 'part_images');
+        $response->assertJsonPath('export_id', $s['export_id']);
+        $this->assertStringNotContainsString('SECRET',$response->getContent());
+        Http::assertNothingSent();
     }
 }

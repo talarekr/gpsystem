@@ -38,7 +38,7 @@ existing migration sanitization policy. No data is fetched from providers.
 `czesci`: all parts; `sprzedane`: status=sold; `do_wystawienia`: needs_listing=true.
 No stock, storefront visibility or listing inference changes those rules.
 
-Sample selects up to five rows from the requested set, ranking car/category/storage,
+Sample selects up to five rows from the first 100 eligible IDs in the requested set, ranking car/category/storage,
 description, photos (including multiple photos), price, priced listings, explicit
 DE listings and Ovoko listings. Ties use ascending part ID. There is no randomness.
 Selected IDs appear in status and the manifest. With fewer than five eligible rows,
@@ -49,7 +49,7 @@ IDs. Memory scales with one batch and its relations, not the whole catalog; an
 exceptionally large individual product/gallery still costs memory. A private
 newline-delimited capture is sealed only after the transaction succeeds. Metadata
 includes database capture time, finish time, schema inventory, source Git commit,
-schema version and SHA256. This reads Git locally, with no network command.
+schema version and SHA256. Revision metadata is read through PHP/configuration, without executing Git; ZIP deployments without it are marked unavailable.
 
 CSV projection runs in ticks of at most 25 parts. It uses only the new capture,
 not the database. Byte offsets are committed atomically in a private checkpoint;
@@ -252,3 +252,51 @@ ovoko_listing_currency
 ovoko_last_synced_at
 ovoko_last_seen_at
 ```
+
+## Failure diagnostics and MySQL compatibility follow-up
+
+The #1536 engine check used `pluck('engine')` against information_schema.tables.
+MySQL 8.4 returns the unaliased label `ENGINE`; Laravel then raises ErrorException
+when accessing `$row->engine`. The regression test reproduces this exact old
+expression, and the fixed code uses `ENGINE AS source_engine`. This happens
+before sample selection or capture file creation. This is a locally reproduced
+code defect; without a production receipt/log it is not proof of which failure
+the reported production request encountered.
+
+The exact SET TRANSACTION / beginTransaction ordering is exercised against real,
+isolated MySQL 8.4. A raw write in that transaction is rejected with error 1792.
+The integration fixture is synthetic and has NULL relationships and no optional
+tables. Tests require the disposable database name `fresh_export_test` and do not
+connect to a production database.
+
+Sample ranking now considers at most the first 100 eligible IDs in ascending
+order, then selects at most five by the existing completeness score. The query
+never ranks the entire product catalog. Capture remains limited to the selected
+five IDs and their local relations. No broad data capture precedes selection.
+
+Prepare no longer executes Git or depends on proc_open: source revision is read
+from `GPSWISS_PRODUCT_EXPORT_SOURCE_COMMIT` configuration or local .git files via
+PHP. In a ZIP deployment without revision metadata it is NULL, explicitly marked
+source_commit_status=unavailable; it is never guessed. Configure the verified
+release SHA when that metadata is required. No deploy helper is modified here.
+
+Each mutating operation persists a unique `operation-{operation_id}.json` receipt
+and the latest `operation.json`, with export_id, action, phase,
+reason_code, backend_exception_class, safe_exception_category, current_table,
+current_join, current_part_id, capture_processed, selected_products,
+checkpoint_present, last_successful_phase, duration_ms and memory_peak_bytes.
+Phases are persisted **before** risky calls. Read-only status polling returns
+this receipt without rewriting it. Exceptions return a JSON receipt immediately;
+UI displays it even if the operation failed before its normal response. The
+receipt never stores exception messages, SQL/bindings, trace, tokens or payloads.
+Serialization errors and common SQLSTATE/schema/permission/timeout categories
+are classified without exposing their text. A shutdown callback reserves memory
+for a best-effort fatal receipt; SIGKILL, worker loss or an unwritable filesystem
+cannot guarantee a final receipt. A last `running` phase indicates interruption,
+not success. If the private directory cannot be written, safe metadata falls back
+to PHP's error log; durable artifact storage is then unavailable.
+
+The deployment archive path has no .git, so #1536's source revision lookup was a
+separate preparation failure mode. It is covered without invoking a subprocess.
+Known engine compatibility and diagnostics gaps are fixed here; the historical
+production incident remains unconfirmed without its existing log/checkpoint.

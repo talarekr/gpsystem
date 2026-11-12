@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Services\MigrationExport\FreshProductExport;
 use App\Services\MigrationExport\MigrationExportException;
 use Illuminate\Http\Request;
+use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 
 final class FreshProductExportController extends Controller
 {
@@ -33,9 +34,15 @@ final class FreshProductExportController extends Controller
                 return response()->view('admin.tools.product-migration-export')->header('Cache-Control', 'private, no-store');
             }
 
+            $data['diagnostic'] = $exports->failureReceipt() ?? ($data['diagnostic'] ?? null);
+
             return response()->json($data)->header('Cache-Control', 'private, no-store');
         } catch (MigrationExportException $e) {
-            return response()->json(['error' => $e->reasonCode], $e->httpStatus)->header('Cache-Control', 'private, no-store');
+            return response()->json(['error' => $e->reasonCode, 'export_id' => $exports->failureReceipt()['export_id'] ?? $export, 'diagnostic' => $exports->failureReceipt()], $e->httpStatus)->header('Cache-Control', 'private, no-store');
+        } catch (HttpExceptionInterface $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            return response()->json(['error' => 'product_export_operation_failed', 'export_id' => $exports->failureReceipt()['export_id'] ?? $export, 'diagnostic' => $exports->failureReceipt()], 500)->header('Cache-Control', 'private, no-store');
         }
     }
 }
