@@ -1,6 +1,7 @@
 <?php
 
 return [
+    'product_source_commit' => env('GPSWISS_PRODUCT_EXPORT_SOURCE_COMMIT'),
     'root' => storage_path('app/private/migration-exports'),
 
     // Browser v3 never launches CLI. These settings belong only to the optional legacy CLI mode.

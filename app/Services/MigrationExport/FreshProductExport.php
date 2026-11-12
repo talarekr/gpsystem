@@ -6,11 +6,12 @@ use App\Services\Marketplace\ShippingRateAudit\ReadOnlyDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
-use Symfony\Component\Process\Process;
 
 /** Independent fresh DB capture, followed by resumable filesystem-only CSV projection. */
 final class FreshProductExport
 {
+    private ?ProductExportOperation $operation = null;
+
     public const TYPES = ['czesci', 'sprzedane', 'do_wystawienia'];
 
     public function prepare(int $owner, string $type, string $mode): array
@@ -20,19 +21,21 @@ final class FreshProductExport
         }
         $id = (string) Str::uuid();
         $dir = $this->root().'/'.$id;
-        if (! is_dir($dir) && ! mkdir($dir, 0700, true)) {
-            throw new MigrationExportException('export_directory_unavailable');
-        }
-        $process = new Process(['git', 'rev-parse', 'HEAD'], base_path());
-        $process->run();
-        $commit = trim($process->getOutput());
-        if (! $process->isSuccessful() || ! preg_match('/^[a-f0-9]{40}$/D', $commit)) {
-            throw new MigrationExportException('source_commit_unavailable');
-        }
-        $state = ['export_id' => $id, 'owner_id' => $owner, 'type' => $type, 'mode' => $mode, 'schema_version' => ProductExportProjection::VERSION, 'source_commit' => $commit, 'state' => 'capturing', 'captured_at' => null, 'total' => 0, 'processed' => 0, 'images' => 0, 'listings' => 0, 'issues' => 0, 'capture_offset' => 0, 'offsets' => [], 'files' => [], 'sample_part_ids' => []];
-        $this->save($dir.'/state.json', $state);
+        $this->operation = new ProductExportOperation($dir, $id, 'prepare');
 
-        return $this->reply($state);
+        return $this->operation->run(function () use ($dir, $id, $owner, $type, $mode) {
+            $this->phase('directory_create');
+            if (! is_dir($dir) && ! mkdir($dir, 0700, true)) {
+                throw new MigrationExportException('export_directory_unavailable');
+            }
+            $this->phase('source_revision');
+            $commit = $this->sourceCommit();
+            $state = ['export_id' => $id, 'owner_id' => $owner, 'type' => $type, 'mode' => $mode, 'schema_version' => ProductExportProjection::VERSION, 'source_commit' => $commit, 'source_commit_status' => $commit ? 'available' : 'unavailable', 'state' => 'capturing', 'captured_at' => null, 'total' => 0, 'processed' => 0, 'images' => 0, 'listings' => 0, 'issues' => 0, 'capture_offset' => 0, 'offsets' => [], 'files' => [], 'sample_part_ids' => []];
+            $this->phase('prepare_checkpoint');
+            $this->save($dir.'/state.json', $state);
+
+            return $this->reply($state);
+        });
     }
 
     private function runCapture(string $dir, array $state): array
@@ -56,6 +59,7 @@ final class FreshProductExport
 
     private function capture(string $dir, array &$state): void
     {
+        $this->phase('database_connect');
         $db = DB::connection();
         if ($db->transactionLevel() !== 0 && ! app()->environment('testing')) {
             throw new MigrationExportException('capture_requires_new_transaction');
@@ -65,19 +69,28 @@ final class FreshProductExport
             throw new MigrationExportException('capture_driver_unsupported');
         }
         if ($driver === 'mysql') {
+            $this->phase('transaction_configure');
             $db->getPdo()->exec('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY');
         }
+        $this->phase('transaction_begin');
         ReadOnlyDatabase::run(function () use ($dir, &$state, $driver, $db) {
             return $db->transaction(function () use ($dir, &$state, $driver, $db) {
                 $tables = ['parts', 'cars', 'part_categories', 'storage_locations', 'part_images', 'marketplace_listings', 'marketplace_accounts', 'marketplace_category_mappings', 'allegro_shipping_rates', 'part_translations', 'category_translations'];
-                $available = array_values(array_filter($tables, fn ($t) => Schema::hasTable($t)));
+                $available = [];
+                foreach ($tables as $t) {
+                    $this->phase('schema_table_check', $t);
+                    if (Schema::hasTable($t)) {
+                        $available[] = $t;
+                    }
+                }
                 foreach (array_slice($tables, 0, 6) as $required) {
                     if (! in_array($required, $available, true)) {
                         throw new MigrationExportException('capture_required_table_missing');
                     }
                 }
                 if ($driver === 'mysql') {
-                    $engines = $db->table('information_schema.tables')->where('table_schema', $db->getDatabaseName())->whereIn('table_name', $available)->pluck('engine');
+                    $this->phase('schema_engine_check', 'information_schema.tables');
+                    $engines = $db->table('information_schema.tables')->where('table_schema', $db->getDatabaseName())->whereIn('table_name', $available)->selectRaw('ENGINE AS source_engine')->pluck('source_engine');
                     if ($engines->count() !== count($available) || $engines->contains(fn ($e) => strtoupper($e) !== 'INNODB')) {
                         throw new MigrationExportException('capture_requires_innodb');
                     }
@@ -86,8 +99,10 @@ final class FreshProductExport
                 $state['consistency'] = $driver === 'mysql' ? 'repeatable_read_read_only_innodb' : 'sqlite_read_transaction';
                 $schema = [];
                 foreach ($available as $table) {
+                    $this->phase('schema_columns', $table);
                     $schema[$table] = Schema::getColumnListing($table);
                 }
+                $this->phase('schema_checkpoint');
                 $this->save($dir.'/schema.json', $schema);
                 $query = DB::table('parts');
                 if ($state['type'] === 'sprzedane') {
@@ -99,16 +114,23 @@ final class FreshProductExport
                 if ($state['mode'] === 'sample') {
                     // Indexed correlated EXISTS avoid random selection and gallery/listing Cartesian products.
                     $score = "(CASE WHEN car_id IS NOT NULL THEN 2 ELSE 0 END + CASE WHEN category_id IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN storage_location_id IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN description IS NOT NULL AND description <> '' THEN 1 ELSE 0 END + CASE WHEN EXISTS (SELECT 1 FROM part_images i WHERE i.part_id = parts.id) THEN 2 ELSE 0 END + CASE WHEN (SELECT COUNT(*) FROM part_images i WHERE i.part_id = parts.id) >= 2 THEN 1 ELSE 0 END + CASE WHEN price IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN EXISTS (SELECT 1 FROM marketplace_listings l WHERE l.part_id = parts.id AND l.price IS NOT NULL) THEN 1 ELSE 0 END + CASE WHEN EXISTS (SELECT 1 FROM marketplace_listings l WHERE l.part_id = parts.id AND l.marketplace = 'ebay_de') THEN 2 ELSE 0 END + CASE WHEN EXISTS (SELECT 1 FROM marketplace_listings l WHERE l.part_id = parts.id AND l.marketplace LIKE 'ovoko%') THEN 2 ELSE 0 END)";
-                    $ids = (clone $query)->orderByRaw($score.' DESC')->orderBy('id')->limit(5)->pluck('id')->all();
+                    $this->phase('sample_candidates', 'parts');
+                    $candidates = (clone $query)->orderBy('id')->limit(100)->pluck('id')->all();
+                    $this->phase('sample_selection', 'parts');
+                    $ids = (clone $query)->whereIn('id', $candidates)->orderByRaw($score.' DESC')->orderBy('id')->limit(5)->pluck('id')->all();
                     $state['sample_part_ids'] = array_map('strval', $ids);
                     $query->whereIn('id', $ids);
                 }
+                $this->phase('selected_count', 'parts');
                 $state['total'] = (clone $query)->count();
                 $state['capture_processed'] = 0;
                 $this->save($dir.'/state.json', $state);
+                $this->operation?->counts(0, $state['total']);
+                $this->phase('capture_open');
                 $stream = fopen($dir.'/capture.pending', 'xb');
                 chmod($dir.'/capture.pending', 0600);
                 try {
+                    $this->phase('parts_read', 'parts');
                     $query->orderBy('id')->chunkById(100, function ($parts) use ($stream, $schema, $dir, &$state) {
                         $ids = $parts->pluck('id')->all();
                         $cars = $this->indexed('cars', $parts->pluck('car_id')->filter()->all());
@@ -121,6 +143,7 @@ final class FreshProductExport
                         if (isset($schema['marketplace_accounts'])) {
                             // Never read credentials. Only the marketplace ID is retained from settings.
                             $fields = array_values(array_intersect(['id', 'code', 'marketplace', 'api_settings'], $schema['marketplace_accounts']));
+                            $this->phase('relation_read', 'marketplace_accounts');
                             foreach (DB::table('marketplace_accounts')->whereIn('id', $accountIds)->get($fields) as $a) {
                                 $a = (array) $a;
                                 $settings = json_decode($a['api_settings'] ?? '{}', true) ?: [];
@@ -133,30 +156,39 @@ final class FreshProductExport
                         $translations = isset($schema['part_translations']) ? $this->rows('part_translations', 'part_id', $ids) : [];
                         $categoryTranslations = isset($schema['category_translations']) ? $this->rows('category_translations', 'category_id', array_keys($categories)) : [];
                         foreach ($parts as $part) {
+                            $this->phase('part_normalize', 'parts', (string) $part->id);
                             $p = $this->cleanRow((array) $part);
+                            $this->phase('store_url', 'parts', (string) $part->id);
+                            $storeUrl = $this->storeUrl($p);
                             $capture = ['part' => $p, 'car' => $cars[(string) ($p['car_id'] ?? '')] ?? null, 'category' => $categories[(string) ($p['category_id'] ?? '')] ?? null, 'location' => $locations[(string) ($p['storage_location_id'] ?? '')] ?? null, 'accounts' => $accounts, 'shipping_rates' => $rates,
                                 'images' => array_values(array_filter($images, fn ($i) => (string) $i['part_id'] === (string) $p['id'])),
                                 'listings' => array_values(array_filter($listings, fn ($l) => (string) $l['part_id'] === (string) $p['id'])),
                                 'mappings' => array_values(array_filter($mappings, fn ($m) => (string) $m['local_category_id'] === (string) ($p['category_id'] ?? ''))),
                                 'translations' => array_values(array_filter($translations, fn ($t) => (string) $t['part_id'] === (string) $p['id'])),
                                 'category_translations' => array_values(array_filter($categoryTranslations, fn ($t) => (string) $t['category_id'] === (string) ($p['category_id'] ?? ''))),
-                                'store_url' => $this->storeUrl($p)];
+                                'store_url' => $storeUrl];
+                            $this->phase('capture_serialize', 'parts', (string) $part->id);
                             $bytes = json_encode($capture, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR)."\n";
+                            $this->phase('capture_write', 'parts', (string) $part->id);
                             if (fwrite($stream, $bytes) !== strlen($bytes)) {
                                 throw new MigrationExportException('capture_write_failed');
                             }
                             $state['capture_processed']++;
+                            $this->operation?->counts($state['capture_processed'], $state['total']);
                         }
                         $this->save($dir.'/state.json', $state);
                     });
+                    $this->phase('capture_flush');
                     if (! fflush($stream)) {
                         throw new MigrationExportException('capture_flush_failed');
                     }
                 } finally {
                     fclose($stream);
                 }
+                $this->phase('transaction_commit');
             });
         });
+        $this->phase('capture_seal');
         // Seal only after a successfully completed transaction. Never adopt partial captures.
         if (! rename($dir.'/capture.pending', $dir.'/capture.jsonl')) {
             throw new MigrationExportException('capture_seal_failed');
@@ -180,6 +212,8 @@ final class FreshProductExport
 
     private function rows(string $table, string $key, array $ids): array
     {
+        $this->phase('relation_read', $table);
+
         return DB::table($table)->whereIn($key, $ids)->orderBy('id')->get()->map(fn ($r) => $this->cleanRow((array) $r))->all();
     }
 
@@ -209,8 +243,13 @@ final class FreshProductExport
     {
         $dir = $this->directory($id);
 
-        return $this->locked($dir, function () use ($dir, $owner, $action) {
+        $this->load($dir, $owner);
+        $this->operation = new ProductExportOperation($dir, $id, $action);
+
+        return $this->locked($dir, fn () => $this->operation->run(function () use ($dir, $owner, $action) {
             $s = $this->load($dir, $owner);
+            $this->operation?->counts($s['capture_processed'] ?? 0, $s['total']);
+            $this->phase('action_start');
             if (! in_array($action, ['capture', 'tick', 'resume', 'stop'], true)) {
                 throw new MigrationExportException('invalid_export_action', 422);
             }
@@ -237,10 +276,11 @@ final class FreshProductExport
             } elseif ($s['state'] !== 'stopped') {
                 $this->emit($dir, $s);
             }
+            $this->phase('action_checkpoint');
             $this->save($dir.'/state.json', $s);
 
             return $this->reply($s);
-        });
+        }));
     }
 
     private function emit(string $dir, array &$s): void
@@ -264,6 +304,7 @@ final class FreshProductExport
             fseek($capture, $s['capture_offset']);
             for ($n = 0; $n < 25 && ($line = fgets($capture)) !== false; $n++) {
                 $data = json_decode($line, true, 512, JSON_THROW_ON_ERROR | JSON_BIGINT_AS_STRING);
+                $this->phase('csv_projection', 'parts', (string) $data['part']['id']);
                 $out = ProductExportProjection::project($data);
                 foreach ([$s['type'].'.csv' => [$out['part']], 'zdjecia_czesci.csv' => $out['photos'], 'marketplace_listingi_czesci.csv' => $out['listings'], 'issues.csv' => $out['issues'], 'relacje_czesci.csv' => [['part_id' => $data['part']['id']] + $data]] as $name => $rows) {
                     foreach ($rows as $row) {
@@ -284,7 +325,7 @@ final class FreshProductExport
                 foreach ($definitions as $name => $columns) {
                     $s['files'][$name] = ['sha256' => hash_file('sha256', $dir.'/'.$name), 'bytes' => filesize($dir.'/'.$name)];
                 }
-                $this->save($dir.'/manifest.json', array_intersect_key($s, array_flip(['export_id', 'type', 'mode', 'schema_version', 'source_commit', 'captured_at', 'capture_finished_at', 'consistency', 'capture_sha256', 'total', 'images', 'listings', 'issues', 'files', 'sample_part_ids'])) + ['columns' => $definitions, 'null' => '\\N', 'delimiter' => ';', 'encoding' => 'UTF-8 BOM', 'store_url_contract' => 'configured PL app.url + storefront.product; URL identity does not imply current availability']);
+                $this->save($dir.'/manifest.json', array_intersect_key($s, array_flip(['export_id', 'type', 'mode', 'schema_version', 'source_commit', 'source_commit_status', 'captured_at', 'capture_finished_at', 'consistency', 'capture_sha256', 'total', 'images', 'listings', 'issues', 'files', 'sample_part_ids'])) + ['columns' => $definitions, 'null' => '\\N', 'delimiter' => ';', 'encoding' => 'UTF-8 BOM', 'store_url_contract' => 'configured PL app.url + storefront.product; URL identity does not imply current availability']);
                 $s['files']['manifest.json'] = ['sha256' => hash_file('sha256', $dir.'/manifest.json'), 'bytes' => filesize($dir.'/manifest.json')];
             }
         } finally {
@@ -335,6 +376,30 @@ final class FreshProductExport
         $s['offsets'][$name] = ($s['offsets'][$name] ?? 0) + strlen($bytes);
     }
 
+    public function failureReceipt(): ?array
+    {
+        return $this->operation?->receipt();
+    }
+
+    private function phase(string $phase, ?string $table = null, ?string $part = null): void
+    {
+        $this->operation?->phase($phase, $table, $part);
+    }
+
+    private function sourceCommit(): ?string
+    {
+        $configured = config('migration_export.product_source_commit');
+        if (is_string($configured) && preg_match('/^[a-f0-9]{40}$/D', $configured)) {
+            return $configured;
+        }
+        $head = @file_get_contents(base_path('.git/HEAD'));
+        if (is_string($head) && preg_match('/^ref: (refs\/[a-zA-Z0-9_\/.-]+)$/D', trim($head), $m) && ! str_contains($m[1], '..')) {
+            $head = @file_get_contents(base_path('.git/'.$m[1]));
+        }
+
+        return is_string($head) && preg_match('/^[a-f0-9]{40}$/D', trim($head)) ? trim($head) : null;
+    }
+
     private function root(): string
     {
         return config('migration_export.product_root', storage_path('app/private/product-migration-exports'));
@@ -350,7 +415,7 @@ final class FreshProductExport
             throw new MigrationExportException('export_not_found', 404);
         }
 
-return $dir;
+        return $dir;
     }
 
     private function load(string $dir, int $owner): array
@@ -360,12 +425,21 @@ return $dir;
             throw new MigrationExportException('export_not_found', 404);
         }
 
-return $s;
+        return $s;
     }
 
     private function reply(array $s): array
     {
-        return array_diff_key($s, array_flip(['owner_id', 'offsets', 'capture_offset']));
+        $diagnostic = $this->operation?->receipt();
+        if (($diagnostic['export_id'] ?? null) !== $s['export_id']) {
+            $diagnostic = null;
+        }
+        $path = $this->root().'/'.$s['export_id'].'/operation.json';
+        if (! $diagnostic && is_file($path)) {
+            $diagnostic = json_decode(file_get_contents($path), true);
+        }
+
+        return ['diagnostic' => $diagnostic] + array_diff_key($s, array_flip(['owner_id', 'offsets', 'capture_offset']));
     }
 
     private function save(string $path, array $value): void
