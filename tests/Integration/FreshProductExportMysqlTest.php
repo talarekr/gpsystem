@@ -105,9 +105,11 @@ class FreshProductExportMysqlTest extends TestCase
         }
         $s = $service->action(7, $s['export_id'], 'tick');
         $this->assertSame('done', $s['state']);
-        foreach (['czesci.csv', 'zdjecia_czesci.csv', 'marketplace_listingi_czesci.csv', 'relacje_czesci.csv', 'issues.csv', 'manifest.json'] as $name) {
+        foreach (['czesci.csv', 'manifest.json'] as $name) {
             $this->assertFileExists($service->download(7, $s['export_id'], $name));
         }
+        $this->assertSame(['czesci.csv', 'manifest.json'], array_keys($s['files']));
+        $this->assertCount(1, glob($this->root.'/'.$s['export_id'].'/*.csv'));
         foreach ($queries as $sql) {
             $this->assertMatchesRegularExpression('/^select\b/i', $sql);
         }

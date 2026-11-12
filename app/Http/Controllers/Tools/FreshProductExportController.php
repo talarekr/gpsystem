@@ -14,7 +14,7 @@ final class FreshProductExportController extends Controller
     public function __invoke(Request $request, FreshProductExport $exports, ?string $export = null)
     {
         abort_unless($request->user()?->hasRole(UserRole::OwnerAdmin->value), 403);
-        $input = $request->validate(['action' => ['sometimes', 'in:prepare,capture,tick,resume,stop'], 'type' => ['required_if:action,prepare', 'in:czesci,sprzedane,do_wystawienia'], 'mode' => ['required_if:action,prepare', 'in:sample,full'], 'download' => ['sometimes', 'in:czesci.csv,sprzedane.csv,do_wystawienia.csv,zdjecia_czesci.csv,marketplace_listingi_czesci.csv,relacje_czesci.csv,issues.csv,manifest.json']]);
+        $input = $request->validate(['action' => ['sometimes', 'in:prepare,capture,tick,resume,stop'], 'type' => ['required_if:action,prepare', 'in:czesci,sprzedane,do_wystawienia'], 'mode' => ['required_if:action,prepare', 'in:sample,full'], 'download' => ['sometimes', 'in:czesci.csv,sprzedane.csv,do_wystawienia.csv,manifest.json']]);
         $owner = (int) $request->user()->id;
         try {
             if ($request->isMethod('post')) {
