@@ -9,6 +9,11 @@
 <p id="status" role="status" aria-live="polite">Gotowy do przygotowania</p><progress id="progress" value="0" max="1"></progress>
 <p id="counts"></p><p id="sample"></p><button id="resume" disabled>Resume — wznów</button><button id="stop" disabled>Stop</button>
 <p id="error" role="alert"></p><ul id="files"></ul><details><summary>Diagnostyka</summary><pre id="diagnostics"></pre></details>
+<details id="photo-storage"><summary>Ścieżki oryginalnych zdjęć (tylko odczyt)</summary>
+<p>Ścieżki tego serwera. Przykład to stała wartość ścieżki, bez wyszukiwania rekordu w bazie. Sprawdzamy plik na dysku public; inne historyczne lokalizacje nie są tutaj skanowane.</p>
+<p>Gdy plik istnieje, ścieżka resolved_absolute_path uwzględnia symlinki. exists: false oznacza brak pliku widocznego pod tą ścieżką dla procesu PHP.</p>
+<pre id="photo-storage-diagnostic" style="white-space:pre-wrap;overflow-wrap:anywhere">{{ json_encode($photoStorageDiagnostic, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) }}</pre>
+</details>
 </main><script>
 const base=@json(route('admin.tools.product-migration-export', [], false)), key='gpswiss-product-export-'+@json((string)auth()->id()), el=id=>document.getElementById(id);
 let id=localStorage.getItem(key), state=null, running=false, busy=false;

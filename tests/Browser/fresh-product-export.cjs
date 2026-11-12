@@ -3,7 +3,8 @@ const {chromium}=require('playwright'), fs=require('fs'), assert=require('node:a
 const base='/admin/tools/product-migration-export', id='10000000-0000-4000-8000-000000000001';
 const html=fs.readFileSync(__dirname+'/../../resources/views/admin/tools/product-migration-export.blade.php','utf8')
 .replace("@json(route('admin.tools.product-migration-export', [], false))",JSON.stringify(base))
-.replace('@json((string)auth()->id())','"7"').replace('{{ csrf_token() }}','csrf-test');
+.replace('@json((string)auth()->id())','"7"').replace('{{ csrf_token() }}','csrf-test')
+.replace('{{ json_encode($photoStorageDiagnostic, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) }}', JSON.stringify({part_images_disk:'public',disk_root:'/fixture/storage/app/public',example:{resolved_absolute_path:'/fixture/storage/app/public/parts/photos/imported/2082/example.jpg',exists:false}}));
 (async()=>{const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',headless:true,args:['--no-sandbox']});try{
  const page=await browser.newPage(), errors=[];page.on('pageerror',e=>errors.push(e.message));
  let state={export_id:id,type:'czesci',mode:'sample',state:'capturing',total:5,processed:0,images:0,listings:0,issues:0,sample_part_ids:['1','2','3','4','5'],files:{}},fail=true,captures=0,ticks=0;
@@ -22,7 +23,13 @@ const html=fs.readFileSync(__dirname+'/../../resources/views/admin/tools/product
   }
   return route.fulfill({contentType:'application/json',body:JSON.stringify(state)});
  });
- await page.goto('https://gpswiss.pl'+base);await page.click('#prepare');await page.waitForFunction(()=>document.querySelector('#error').textContent.includes('temporary_failure'));
+ await page.goto('https://gpswiss.pl'+base);
+ assert.equal(await page.locator('#photo-storage-diagnostic').isVisible(),false);
+ await page.click('#photo-storage summary');
+ assert.equal(await page.locator('#photo-storage-diagnostic').isVisible(),true);
+ assert.match(await page.locator('#photo-storage-diagnostic').textContent(),/fixture\/storage\/app\/public/);
+ assert.equal(captures,0);assert.equal(ticks,0);
+ await page.click('#prepare');await page.waitForFunction(()=>document.querySelector('#error').textContent.includes('temporary_failure'));
  assert.equal(captures,1);await page.reload();await page.waitForFunction(()=>document.querySelector('#counts').textContent.includes('0/5'));
  await page.click('#stop');await page.waitForFunction(()=>document.querySelector('#status').textContent==='Zatrzymany');
  await page.reload();await page.waitForFunction(()=>document.querySelector('#status').textContent==='Zatrzymany');
