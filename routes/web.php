@@ -3053,3 +3053,10 @@ Route::match(['get', 'post'], '/admin/tools/product-migration-export/{export?}',
     ->withoutMiddleware(\Illuminate\Session\Middleware\StartSession::class)
     ->middleware([\App\Http\Middleware\ShippingRateAuditReadOnly::class, \App\Http\Middleware\ReadOnlyPreviewSession::class, Authenticate::class, 'admin.panel'])
     ->name('admin.tools.product-migration-export');
+
+
+// Explicit OwnerAdmin-only credential read. No source DB/session writes or provider calls.
+Route::match(['get', 'post'], '/admin/tools/ovoko-credentials', \App\Http\Controllers\Tools\OwnerOvokoCredentialsController::class)
+    ->withoutMiddleware(\Illuminate\Session\Middleware\StartSession::class)
+    ->middleware([\App\Http\Middleware\ShippingRateAuditReadOnly::class, \App\Http\Middleware\ReadOnlyPreviewSession::class, Authenticate::class, 'admin.panel'])
+    ->name('admin.tools.ovoko-credentials');
