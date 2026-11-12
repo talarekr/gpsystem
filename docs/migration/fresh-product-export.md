@@ -57,7 +57,23 @@ Car identity is parts.car_id → cars.id; Ovoko ID is an additional identity.
 Car generation/year/engine/gearbox/fuel map to model_variant/production_year/
 engine_capacity_cm3 (cm³)/gearbox_type/fuel_type. No linked car yields NULL car
 object and convenience fields. Parts prices and recorded listing prices remain
-independent, with no conversion or fallback; parts.ebay_price is the PLN base.
+independent, with no conversion or fallback:
+
+- `store_price` is the locally configured store price in PLN (`store_currency=PLN`).
+- `ebay_price` is the actual locally configured eBay selling price in PLN, copied
+  from parts.ebay_price. For example, store 50.00 PLN and eBay 62.50 PLN means
+  the local eBay price already includes the 25% increase. It is neither a technical
+  auxiliary value nor an EUR amount. The exporter/importer must preserve the
+  stored price, without applying the increase again or recalculating it.
+- `ebay_de_listing_price` with `ebay_de_listing_currency` is the last locally
+  recorded price of a specific existing eBay DE listing (for example 14.25 EUR).
+  It is separate historical listing information and must never overwrite
+  ebay_price, even when the listing is unique. Missing/ambiguous listing values
+  do not change the locally configured eBay price either.
+
+The eBay integration converts the local PLN eBay price to EUR at publication.
+Export and WystawCzesc import must not perform that conversion. Both price
+meanings must remain separate in the imported product/listing data.
 Local Allegro shipping ID requires one associated account and one matching rate.
 Store URLs still use configured Polish app.url plus the named storefront.product
 route `/produkt/{slug}`, with local ID fallback. Legacy URL/slugs are preserved.
