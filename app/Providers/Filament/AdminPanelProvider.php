@@ -132,6 +132,10 @@ class AdminPanelProvider extends PanelProvider
                     ->collapsible(false),
             ])
             ->navigationItems([
+                NavigationItem::make('Eksport do WystawCzesc')
+                    ->group('Części')->sort(90)
+                    ->url(fn (): string => route('admin.tools.product-migration-export'))
+                    ->visible(fn (): bool => auth()->user()?->hasRole(\App\Enums\UserRole::OwnerAdmin->value) ?? false),
                 NavigationItem::make('Dodaj magazyn')
                     ->group('Magazyn')
                     ->sort(40)

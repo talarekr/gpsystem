@@ -3046,3 +3046,10 @@ Route::match(['get', 'post'], '/admin/tools/gpswiss-migration-export/{invalidPat
     ->withoutMiddleware(\Illuminate\Session\Middleware\StartSession::class)
     ->middleware([\App\Http\Middleware\ShippingRateAuditReadOnly::class, \App\Http\Middleware\ReadOnlyPreviewSession::class, Authenticate::class, 'admin.panel'])
     ->name('admin.tools.gpswiss-migration-export.invalid');
+
+// Fresh product-only export; read-only sessions and SQL, independent of every legacy migration run.
+Route::match(['get', 'post'], '/admin/tools/product-migration-export/{export?}', \App\Http\Controllers\Tools\FreshProductExportController::class)
+    ->whereUuid('export')
+    ->withoutMiddleware(\Illuminate\Session\Middleware\StartSession::class)
+    ->middleware([\App\Http\Middleware\ShippingRateAuditReadOnly::class, \App\Http\Middleware\ReadOnlyPreviewSession::class, Authenticate::class, 'admin.panel'])
+    ->name('admin.tools.product-migration-export');
